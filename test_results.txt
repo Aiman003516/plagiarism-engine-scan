@@ -1,0 +1,6 @@
+PASS: Register
+PASS: Login
+FAIL: Auth Me - {"detail":"Invalid or expired token"}
+PASS: Stats
+PASS: Teams
+PASS: Settings

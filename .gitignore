@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+
+# Virtual Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+test_env/
+
+# Node / React (Frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/tsc_out.txt
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Databases and Data
+*.sqlite
+*.sqlite3
+data/
+!data/.keep
+data/chroma_db/
+data/faiss_index/
+data/system_db.sqlite
+data/scan_history.json
+data/*.sqlite
+data/*.json
+
+# Secrets and Configs
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Temp and Uploads
+tmp/
+temp/
+*.zip
+dummy_project.zip
+dummy_project_dir/
+
+# Media / Screenshots
+test_screenshots/
+full_test_screens/
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# OS Files
+.DS_Store
+Thumbs.db

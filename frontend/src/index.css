@@ -1,0 +1,215 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: rgb(var(--bg-background));
+  --color-surface: rgb(var(--bg-surface));
+  --color-card: rgb(var(--bg-surface));
+  --color-text-main: rgb(var(--text-main));
+  --color-text-muted: rgb(var(--text-muted));
+  --color-border: rgb(var(--border));
+  --color-glass-border: rgba(var(--glass-border), 0.15);
+
+  --color-primary: rgb(var(--primary));
+  --color-primary-hover: rgb(var(--primary-hover));
+  --color-primary-text: rgb(var(--primary-text));
+
+  --color-accent: rgb(var(--accent));
+  --color-accent-hover: rgb(var(--accent-hover));
+  --color-accent-text: rgb(var(--accent-text));
+  --color-accent-light: rgba(var(--accent), 0.15);
+
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+}
+
+@layer base {
+  :root {
+    /* Light Mode: Clean & Editorial */
+    --bg-background: 250 249 245;
+    --bg-surface: 255 255 255;
+    --text-main: 1 62 55;
+    --text-muted: 90 122 117;
+    --border: 235 230 213;
+    --glass-border: 235 230 213;
+
+    --primary: 1 62 55;
+    --primary-hover: 2 92 82;
+    --primary-text: 255 239 179;
+
+    --accent: 255 239 179;
+    --accent-hover: 255 228 154;
+    --accent-text: 1 62 55;
+  }
+
+  .dark {
+    /* Dark Mode: Luxury Command Center */
+    --bg-background: 6 26 23;
+    --bg-surface: 12 43 38;
+    --text-main: 244 243 236;
+    --text-muted: 160 175 169;
+    --border: 26 74 66;
+    --glass-border: 26 74 66;
+
+    --primary: 255 239 179;
+    --primary-hover: 255 233 147;
+    --primary-text: 1 62 55;
+
+    --accent: 255 239 179;
+    --accent-hover: 255 233 147;
+    --accent-text: 1 62 55;
+  }
+
+  html, body {
+    @apply h-full w-full m-0 p-0 overflow-hidden;
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    background-color: var(--color-background);
+    color: var(--color-text-main);
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  html[dir="rtl"] {
+    direction: rtl;
+    text-align: right;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-text-muted/20 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-text-muted/40;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  #root {
+    @apply h-full w-full flex;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-surface/70 backdrop-blur-md border border-border/60 rounded-2xl text-text-main shadow-lg;
+  }
+
+  .glass-card {
+    @apply bg-surface/70 backdrop-blur-lg border border-border/50 rounded-xl p-5 flex flex-col text-text-main shadow-md transition-colors;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-text-muted transition-colors duration-200;
+  }
+
+  .nav-item:hover {
+    @apply bg-text-muted/10 text-text-main;
+  }
+
+  .nav-item.active {
+    @apply bg-accent text-accent-text;
+  }
+
+  .btn-primary {
+    @apply bg-gradient-to-r from-primary to-primary-hover text-primary-text font-medium rounded-lg px-4 py-2 hover:opacity-90 transition-opacity flex items-center justify-center gap-2;
+  }
+
+  .input-field {
+    @apply bg-surface border border-border rounded-lg px-3 py-2 text-sm text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all;
+  }
+
+  @media print {
+    html, body {
+      height: auto !important;
+      overflow: visible !important;
+      background: #ffffff !important;
+      color: #0f172a !important;
+      font-size: 11pt !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    #root {
+      display: block !important;
+      height: auto !important;
+      width: 100% !important;
+      overflow: visible !important;
+      background: #ffffff !important;
+    }
+
+    /* Hide app navigation chrome, sidebars, headers, floating modals, and interactive buttons */
+    aside,
+    header,
+    nav,
+    button,
+    .print\:hidden,
+    [role="region"],
+    [data-radix-popper-content-wrapper],
+    .fixed,
+    .toaster {
+      display: none !important;
+    }
+
+    /* Main report content container */
+    main {
+      display: block !important;
+      position: static !important;
+      overflow: visible !important;
+      padding: 16px !important;
+      margin: 0 !important;
+      width: 100% !important;
+      height: auto !important;
+      background: #ffffff !important;
+    }
+
+    .max-w-7xl {
+      max-width: 100% !important;
+      padding: 0 !important;
+      margin: 0 !important;
+    }
+
+    /* Professional Card styling for paper print */
+    .glass-card, .glass-panel {
+      background: #ffffff !important;
+      border: 1px solid #cbd5e1 !important;
+      color: #0f172a !important;
+      box-shadow: none !important;
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+      margin-bottom: 1rem !important;
+      border-radius: 8px !important;
+    }
+
+    /* Text contrast */
+    h1, h2, h3, h4, h5, h6, p, span, div, td, th {
+      color: #0f172a !important;
+      text-shadow: none !important;
+    }
+
+    .text-text-muted {
+      color: #475569 !important;
+    }
+
+    /* Vector chart & badge color preservation */
+    * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+  }
+}
+
+@keyframes dotPulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+
