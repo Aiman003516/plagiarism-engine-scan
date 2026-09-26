@@ -7,7 +7,7 @@ class WinnowingEngine:
     Guarantees detection of shared substrings of length >= threshold (t = k + w - 1).
     """
 
-    def __init__(self, k: int = 5, w: int = 4):
+    def __init__(self, k: int = 15, w: int = 10):
         self.k = k  # k-gram size
         self.w = w  # window size
 
@@ -27,7 +27,7 @@ class WinnowingEngine:
         # 1. Generate k-grams and their hashes
         hashes = []
         for i in range(len(token_sequence) - self.k + 1):
-            kgram = "".join(token_sequence[i : i + self.k])
+            kgram = "\x00".join(token_sequence[i : i + self.k])
             hashes.append((self._hash(kgram), i))
 
         if not hashes:

@@ -9,23 +9,32 @@ import { authApi } from "../lib/api";
 export default function Login() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
+  // One field for both identities: an email (staff/admin) or an enrollment ID
+  // (student). The backend resolves it against the users then students table.
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !password) {
+    if (!identifier.trim() || !password) {
       toast.error(t("invalid_credentials"));
       return;
     }
     setLoading(true);
     try {
-      const res = await authApi.login(email.trim(), password);
+      const res = await authApi.login(identifier.trim(), password);
       localStorage.setItem("auth_token", res.token);
       localStorage.setItem("user_data", JSON.stringify(res.user));
       toast.success(t("login_success"));
-      navigate("/dashboard");
+      // Provisioned accounts must rotate their password before using the app.
+      if (res.user.requires_password_change) {
+        navigate("/force-change-password", {
+          state: { oldPassword: password },
+        });
+      } else {
+        navigate("/dashboard");
+      }
     } catch (err: any) {
       toast.error(err?.message || t("invalid_credentials"));
     } finally {
@@ -51,17 +60,17 @@ export default function Login() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-text-main mb-1.5">
-              {t("login_email")}
+              {t("login_identifier")}
             </label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                type="text"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 className="input-field w-full pl-9"
-                placeholder={t("login_email")}
-                autoComplete="email"
+                placeholder={t("login_identifier")}
+                autoComplete="username"
               />
             </div>
           </div>

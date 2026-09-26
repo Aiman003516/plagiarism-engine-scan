@@ -13,6 +13,7 @@ Run:
 """
 
 import os
+import re
 import sys
 import time
 import uuid
@@ -21,6 +22,7 @@ import shutil
 import tempfile
 import subprocess
 import asyncio
+import difflib
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
@@ -48,7 +50,7 @@ from plagiarism_engine import (
     FileExtractor,
     CodePlagiarismDetector,
     TextPlagiarismDetector,
-    MultilingualVectorStore,
+    VectorStore,
     SystemDBStore,
 )
 
@@ -69,9 +71,9 @@ def _preload_models():
         model_pool.get_model("code")
         model_pool.get_model("bge_m3")
         model_pool.get_model("minilm")
-    except Exception:
-        pass
-    _models_ready = True
+        _models_ready = True
+    except Exception as e:
+        print(f"Failed to preload models: {e}")
 
 
 @asynccontextmanager
@@ -90,9 +92,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# A wildcard origin cannot be combined with `allow_credentials=True` on
+# credentialed requests, so the allowed origins are listed explicitly.
+# The Vite dev server runs on port 3000 (frontend/package.json: "vite --port=3000").
+# Override with PLAGIARISM_CORS_ORIGINS="http://host-a,http://host-b" when needed.
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "PLAGIARISM_CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -102,7 +117,7 @@ app.add_middleware(
 # Singletons (cached)
 # ---------------------------------------------------------------------------
 _db: Optional[SystemDBStore] = None
-_vstore: Optional[MultilingualVectorStore] = None
+_vstore: Optional[VectorStore] = None
 
 DATA_DIR = Path(os.environ.get("PLAGIARISM_DATA_DIR", str(Path(__file__).parent / "data")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -148,12 +163,12 @@ def get_db() -> SystemDBStore:
     return _db
 
 
-def get_vstore() -> MultilingualVectorStore:
+def get_vstore() -> VectorStore:
     global _vstore
     if _vstore is None:
-        _vstore = MultilingualVectorStore(
-            collection_name="plagiarism_vector_db",
-            persist_directory=str(DATA_DIR / "chroma_db"),
+        _vstore = VectorStore(
+            index_dir=str(DATA_DIR / "faiss_index"),
+            mapping_path=str(DATA_DIR / "faiss_mapping.json"),
         )
     return _vstore
 
@@ -168,7 +183,10 @@ def _load_history() -> List[Dict[str, Any]]:
     if HISTORY_FILE.exists():
         try:
             return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:
+            backup_path = HISTORY_FILE.with_suffix(f".corrupt.{int(datetime.now().timestamp())}.json")
+            HISTORY_FILE.rename(backup_path)
+            print(f"Failed to load history, backed up corrupted file to {backup_path}: {e}")
             return []
     return []
 
@@ -234,7 +252,11 @@ def _run_intake(
     db.save_project(project_id=project_name, project_name=project_name, files=project_files)
 
     try:
-        vstore.index_project_files(project_files=project_files, project_id=project_name)
+        vstore.index_project_files(
+            project_files=project_files,
+            project_id=project_name,
+            log_callback=log,
+        )
     except Exception as e:
         log(f"   ⚠️ Vector indexing warning: {e}")
 
@@ -266,14 +288,15 @@ def _run_intake(
     t1 = time.time()
     log(f"   ✅ {total_fingerprints} fingerprints computed in {round(t1-t0, 1)}s")
 
-    log("💾 Storing new fingerprints to database index...")
+    log("💾 Storing new fingerprints to database index (batch mode)...")
+    batch = []
     for f in project_files:
         rel_path = f.get("relative_path", f.get("filename", ""))
         ftype = f.get("file_type", "")
         fps = file_fingerprints.get(rel_path, [])
         if fps:
-            db.store_fingerprints(project_name, rel_path, ftype, fps)
-
+            batch.append((rel_path, ftype, fps))
+    db.store_fingerprints_batch(project_name, batch)
     log(f"✅ Intake complete for project: {project_name}")
 
     result = {
@@ -306,7 +329,7 @@ def _run_analysis(
         if log_callback:
             log_callback(msg)
 
-    log(f"[PHASE 1/2] 📂 Loading project '{project_name}' from database...")
+    log(f"[PHASE 1/3] 📂 Loading project '{project_name}' from database...")
     project_files = db.get_project_files(project_name)
     if not project_files:
         raise ValueError(f"Project '{project_name}' not found in database.")
@@ -323,7 +346,7 @@ def _run_analysis(
         if ext:
             languages.add(ext.lstrip("."))
 
-    log("[PHASE 2/2] 🔍 Querying fingerprint index for candidates...")
+    log("[PHASE 2/3] 🔍 Querying fingerprint index for candidates...")
     
     # Fetch fingerprints for this project
     file_fingerprints = db.get_project_fingerprints(project_name)
@@ -354,8 +377,12 @@ def _run_analysis(
         for key, count in valid_candidates.items():
             other_pid, other_path = key.split("::", 1)
             
-            # Simple overlap coefficient: shared / total in source file
-            sim_val = count / total_fps
+            target_fps = db.get_file_fingerprint_count(other_pid, other_path)
+            if not target_fps:
+                continue
+                
+            # Overlap coefficient: shared / min(source, target) allows detecting small files pasted inside large ones
+            sim_val = min(count / min(total_fps, target_fps), 1.0)
             
             if ftype == "code":
                 if sim_val >= 0.25:  # Lowered threshold to see results
@@ -381,6 +408,47 @@ def _run_analysis(
                     })
 
     log(f"   ✅ Scan complete: {len(all_comparisons)} matches from {total_candidates} candidates.")
+
+    # Phase 3: ML-enhanced verification on top Winnowing matches
+    log("[PHASE 3/3] 🤖 Running ML verification on top matches...")
+    code_detector = CodePlagiarismDetector()
+    text_detector = TextPlagiarismDetector()
+
+    for cmp in all_comparisons[:20]:  # Only verify top 20 to save time
+        try:
+            other_pid = cmp["project"]
+            source_content = ""
+            target_content = ""
+
+            # Get source file content
+            for f in project_files:
+                if f.get("relative_path", "") == cmp.get("file1", ""):
+                    source_content = f.get("content", "")
+                    break
+
+            # Get target file content from DB.
+            # NOTE: get_files_by_paths() excludes the project_id passed to it, so we pass the
+            # *source* project and then select the row belonging to the matched (other) project.
+            target_files = db.get_files_by_paths(project_name, [cmp.get("file2", "")])
+            matched = [
+                t for t in target_files
+                if t.get("project_id") == other_pid and t.get("relative_path") == cmp.get("file2", "")
+            ]
+            if matched:
+                target_content = matched[0].get("content", "")
+            elif target_files:
+                target_content = target_files[0].get("content", "")
+
+            if source_content and target_content:
+                if cmp.get("type") == "Code":
+                    # compare_code() reports its hybrid composite score under the "similarity" key.
+                    ml_result = code_detector.compare_code(source_content, target_content)
+                    cmp["ml_similarity"] = f"{round(ml_result.get('similarity', 0) * 100, 2)}%"
+                else:
+                    ml_result = text_detector.compare_pair(source_content, target_content)
+                    cmp["ml_similarity"] = f"{round(ml_result.get('similarity', 0) * 100, 2)}%"
+        except Exception as e:
+            cmp["ml_similarity"] = "N/A"
 
     overall = round(max(max_code_sim, max_text_sim) * 100, 2)
     verdict = "FLAGGED" if overall >= 65 else "SAFE"
@@ -419,6 +487,12 @@ def _run_analysis(
 def _clone_git_repo(repo_url: str, branch: str = "main", access_token: Optional[str] = None, log_callback=None) -> tuple:
     """Clone a git repo to a temp dir and return (temp_dir_path, git_metadata_dict)."""
 
+    # --- Security: validate inputs to prevent git option / command injection ---
+    if not isinstance(repo_url, str) or not repo_url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid repository URL or branch name")
+    if not branch or not re.match(r"^[a-zA-Z0-9._\-/]+$", branch):
+        raise HTTPException(status_code=400, detail="Invalid repository URL or branch name")
+
     def log(msg):
         if log_callback:
             log_callback(msg)
@@ -439,7 +513,7 @@ def _clone_git_repo(repo_url: str, branch: str = "main", access_token: Optional[
 
     try:
         subprocess.run(
-            ["git", "clone", "--depth", "1", "--branch", branch, clone_url, tmp_dir],
+            ["git", "clone", "--depth", "1", "--branch", branch, "--", clone_url, tmp_dir],
             check=True,
             capture_output=True,
             text=True,
@@ -447,8 +521,10 @@ def _clone_git_repo(repo_url: str, branch: str = "main", access_token: Optional[
             env=env
         )
     except subprocess.CalledProcessError as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail=f"Git clone failed: {e.stderr}")
     except FileNotFoundError:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail="Git is not installed on the server.")
 
     log("✅ Repository cloned successfully.")
@@ -491,34 +567,62 @@ def _clone_git_repo(repo_url: str, branch: str = "main", access_token: Optional[
 # ============================================================================
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "ministry-plagiarism-secret-key-change-in-production")
+if JWT_SECRET == "ministry-plagiarism-secret-key-change-in-production":
+    import warnings
+    warnings.warn("Using default JWT secret! Set JWT_SECRET environment variable in production.", stacklevel=2)
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
 _bearer_scheme = HTTPBearer()
 
 
-def _create_access_token(user_id: str, email: str, role: str) -> str:
-    """Build a signed JWT containing the user identity and role."""
+def _create_access_token(user_id: str, email: str, role: str, requires_password_change: bool = False) -> str:
+    """Build a signed JWT containing the user identity, role, and password-change flag."""
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
         "user_id": user_id,
         "email": email,
         "role": role,
+        "requires_password_change": bool(requires_password_change),
         "exp": expire,
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
 class RegisterRequest(BaseModel):
+    """
+    Dual-identity registration:
+      * students sign up with `enrollment_number` -> students table
+      * staff / admins sign up with `email`       -> users table
+    `email` is therefore optional; which identifier is required depends on role.
+    """
     name: str
-    email: str
+    email: Optional[str] = None
+    enrollment_number: Optional[str] = None
     password: str
     role: str = "college_admin"
 
 
 class LoginRequest(BaseModel):
-    email: str
+    """
+    Login now accepts a generic `identifier`: an email for staff/admin accounts
+    (users table) or an enrollment number for student accounts (students table).
+
+    `email` is kept as a backwards-compatible alias so existing clients
+    (streamlit_app.py, frontend/src/lib/api.ts) keep working unchanged.
+    """
+    identifier: Optional[str] = None
+    email: Optional[str] = None
     password: str
+
+    def resolve_identifier(self) -> str:
+        """Return the effective login identifier, whichever field was supplied."""
+        return (self.identifier or self.email or "").strip()
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
 
 
 def require_role(*allowed_roles: str):
@@ -545,19 +649,32 @@ def require_role(*allowed_roles: str):
         if allowed_roles and role not in allowed_roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-        return {"user_id": user_id, "email": email, "role": role}
+        return {
+            "user_id": user_id,
+            "email": email,
+            "role": role,
+            "requires_password_change": bool(payload.get("requires_password_change")),
+        }
 
     return _enforce
 
 
 @app.post("/api/auth/register")
 async def register(payload: RegisterRequest):
+    """
+    Dual-identity signup:
+      * role == "student" -> students table, keyed by enrollment_number
+      * any other role    -> users table, keyed by email
+
+    Student accounts are created with requires_password_change = TRUE, so the
+    first login (or the signup response) routes them through
+    /force-change-password before they can use the app.
+    """
     db = get_db()
-    email = payload.email.strip().lower()
     name = payload.name.strip()
 
-    if not email:
-        raise HTTPException(status_code=400, detail="Email is required")
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
     if not payload.password:
         raise HTTPException(status_code=400, detail="Password is required")
 
@@ -565,52 +682,192 @@ async def register(payload: RegisterRequest):
     if payload.role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(sorted(valid_roles))}")
 
+    password_hash = bcrypt.hashpw(payload.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    account_id = str(uuid.uuid4())
+
+    # --- Student accounts: enrollment_number is their login identity ---
+    if payload.role == "student":
+        enrollment_number = (payload.enrollment_number or "").strip()
+        if not enrollment_number:
+            raise HTTPException(status_code=400, detail="Enrollment number is required for student accounts")
+        if db.get_student_by_enrollment_number(enrollment_number):
+            raise HTTPException(status_code=400, detail="Enrollment number already registered")
+
+        db.create_student(account_id, enrollment_number, name, password_hash, requires_password_change=True)
+
+        token = _create_access_token(account_id, enrollment_number, "student", True)
+        return {
+            "token": token,
+            "user": {
+                "id": account_id,
+                "name": name,
+                # Students have no email; the enrollment number is their identity.
+                "email": enrollment_number,
+                "enrollment_number": enrollment_number,
+                "role": "student",
+                "requires_password_change": True,
+            },
+        }
+
+    # --- Staff / admin accounts: email is their login identity ---
+    email = (payload.email or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required for admin and faculty accounts")
     if db.get_user_by_email(email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    password_hash = bcrypt.hashpw(payload.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    user_id = str(uuid.uuid4())
-    db.create_user(user_id, name, email, password_hash, payload.role, None)
+    db.create_user(account_id, name, email, password_hash, payload.role, None)
 
-    token = _create_access_token(user_id, email, payload.role)
+    token = _create_access_token(account_id, email, payload.role)
     return {
         "token": token,
-        "user": {"id": user_id, "name": name, "email": email, "role": payload.role},
+        "user": {
+            "id": account_id,
+            "name": name,
+            "email": email,
+            "role": payload.role,
+            "requires_password_change": False,
+        },
     }
 
 
 @app.post("/api/auth/login")
 async def login(payload: LoginRequest):
     db = get_db()
-    email = payload.email.strip().lower()
-    user = db.get_user_by_email(email)
+    identifier = payload.resolve_identifier()
 
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not identifier:
+        raise HTTPException(status_code=400, detail="Identifier (email or enrollment number) is required")
+    if not payload.password:
+        raise HTTPException(status_code=400, detail="Password is required")
 
-    if not bcrypt.checkpw(payload.password.encode("utf-8"), user["password_hash"].encode("utf-8")):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+    # Unified lookup: staff/admin by email, then student by enrollment_number.
+    user = db.get_user_or_student_by_login(identifier)
 
-    token = _create_access_token(user["id"], user["email"], user["role"])
-    return {
-        "token": token,
-        "user": {"id": user["id"], "name": user["name"], "email": user["email"], "role": user["role"]},
+    if not user or not user.get("password_hash"):
+        raise HTTPException(status_code=401, detail="Invalid identifier or password")
+
+    try:
+        password_matches = bcrypt.checkpw(
+            payload.password.encode("utf-8"), user["password_hash"].encode("utf-8")
+        )
+    except ValueError:
+        # Malformed / non-bcrypt hash stored on the record.
+        password_matches = False
+
+    if not password_matches:
+        raise HTTPException(status_code=401, detail="Invalid identifier or password")
+
+    is_student = bool(user.get("is_student")) or user.get("role") == "student"
+    requires_password_change = bool(user.get("requires_password_change"))
+
+    token = _create_access_token(user["id"], user["email"], user["role"], requires_password_change)
+
+    response_user = {
+        "id": user["id"],
+        "name": user["name"],
+        "email": user["email"],
+        "role": user["role"],
+        "requires_password_change": requires_password_change,
     }
+    if is_student:
+        response_user["enrollment_number"] = user.get("enrollment_number")
+
+    return {"token": token, "user": response_user}
 
 
 @app.get("/api/auth/me")
 async def auth_me(current_user: dict = Depends(require_role())):
     db = get_db()
     user = db.get_user_by_id(current_user["user_id"])
-    if not user:
+    if user:
+        return {
+            "id": user["id"],
+            "name": user["name"],
+            "email": user["email"],
+            "role": user["role"],
+            "college_id": user.get("college_id"),
+            "requires_password_change": bool(user.get("requires_password_change")),
+            "created_at": user.get("created_at"),
+        }
+
+    # Student tokens resolve against the students table instead.
+    student = db.get_student_by_id(current_user["user_id"])
+    if not student:
         raise HTTPException(status_code=404, detail="User not found")
     return {
-        "id": user["id"],
-        "name": user["name"],
-        "email": user["email"],
-        "role": user["role"],
-        "college_id": user.get("college_id"),
-        "created_at": user.get("created_at"),
+        "id": student["id"],
+        "name": student["name"],
+        "email": student.get("enrollment_number"),
+        "enrollment_number": student.get("enrollment_number"),
+        "role": "student",
+        "college_id": student.get("college_id"),
+        "team_id": student.get("team_id"),
+        "requires_password_change": bool(student.get("requires_password_change")),
+        "created_at": student.get("created_at"),
+    }
+
+
+@app.post("/api/auth/change-password")
+async def change_password(
+    payload: ChangePasswordRequest,
+    current_user: dict = Depends(require_role()),
+):
+    """
+    Rotate the caller's own password. Works for both staff/admin accounts
+    (users table) and student accounts (students table) and clears the
+    forced `requires_password_change` flag on success.
+    """
+    db = get_db()
+    user_id = current_user["user_id"]
+
+    if not payload.old_password:
+        raise HTTPException(status_code=400, detail="Old password is required")
+    if not payload.new_password:
+        raise HTTPException(status_code=400, detail="New password is required")
+    if len(payload.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+    if payload.old_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="New password must differ from the old password")
+
+    is_student = False
+    account = db.get_user_by_id(user_id)
+    if not account:
+        account = db.get_student_by_id(user_id)
+        is_student = True
+    if not account:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    stored_hash = account.get("password_hash")
+    if not stored_hash:
+        raise HTTPException(status_code=400, detail="No password is set for this account")
+
+    try:
+        verified = bcrypt.checkpw(payload.old_password.encode("utf-8"), stored_hash.encode("utf-8"))
+    except ValueError:
+        verified = False
+
+    if not verified:
+        raise HTTPException(status_code=401, detail="Incorrect old password")
+
+    new_hash = bcrypt.hashpw(payload.new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+    if is_student:
+        db.update_student(user_id, password_hash=new_hash, requires_password_change=0)
+        identifier = account.get("enrollment_number")
+        role = "student"
+    else:
+        db.update_user(user_id, password_hash=new_hash, requires_password_change=0)
+        identifier = account.get("email")
+        role = account.get("role")
+
+    # Re-issue the token so the client drops the forced password-change state.
+    token = _create_access_token(user_id, identifier, role, False)
+
+    return {
+        "detail": "Password updated successfully",
+        "requires_password_change": False,
+        "token": token,
     }
 
 
@@ -631,13 +888,13 @@ class TeamMemberAdd(BaseModel):
     enrollment_number: str
 
 
-@app.get("/api/teams")
+@app.get("/api/teams", dependencies=[Depends(require_role())])
 async def list_teams(college_id: Optional[str] = None):
     db = get_db()
     return {"teams": db.get_all_teams(college_id)}
 
 
-@app.post("/api/teams")
+@app.post("/api/teams", dependencies=[Depends(require_role())])
 async def create_team(payload: TeamCreate):
     db = get_db()
     team_id = str(uuid.uuid4())
@@ -646,7 +903,7 @@ async def create_team(payload: TeamCreate):
     return team
 
 
-@app.get("/api/teams/{team_id}")
+@app.get("/api/teams/{team_id}", dependencies=[Depends(require_role())])
 async def get_team(team_id: str):
     db = get_db()
     team = db.get_team_by_id(team_id)
@@ -656,7 +913,7 @@ async def get_team(team_id: str):
     return {**team, "members": members}
 
 
-@app.put("/api/teams/{team_id}")
+@app.put("/api/teams/{team_id}", dependencies=[Depends(require_role())])
 async def update_team(team_id: str, payload: TeamUpdate):
     db = get_db()
     existing = db.get_team_by_id(team_id)
@@ -666,7 +923,7 @@ async def update_team(team_id: str, payload: TeamUpdate):
     return db.get_team_by_id(team_id)
 
 
-@app.delete("/api/teams/{team_id}")
+@app.delete("/api/teams/{team_id}", dependencies=[Depends(require_role())])
 async def delete_team(team_id: str):
     db = get_db()
     existing = db.get_team_by_id(team_id)
@@ -676,7 +933,7 @@ async def delete_team(team_id: str):
     return {"detail": "Team deleted"}
 
 
-@app.post("/api/teams/{team_id}/members")
+@app.post("/api/teams/{team_id}/members", dependencies=[Depends(require_role())])
 async def add_team_member_endpoint(team_id: str, payload: TeamMemberAdd):
     db = get_db()
     team = db.get_team_by_id(team_id)
@@ -689,7 +946,7 @@ async def add_team_member_endpoint(team_id: str, payload: TeamMemberAdd):
     return {"members": db.get_team_members(team_id)}
 
 
-@app.delete("/api/teams/{team_id}/members/{student_id}")
+@app.delete("/api/teams/{team_id}/members/{student_id}", dependencies=[Depends(require_role())])
 async def remove_team_member_endpoint(team_id: str, student_id: str):
     db = get_db()
     team = db.get_team_by_id(team_id)
@@ -720,6 +977,7 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
     role: Optional[str] = None
     college_id: Optional[str] = None
+    requires_password_change: Optional[bool] = None
 
 
 def _serialize_user(user: dict) -> dict:
@@ -730,6 +988,7 @@ def _serialize_user(user: dict) -> dict:
         "email": user["email"],
         "role": user["role"],
         "college_id": user.get("college_id"),
+        "requires_password_change": bool(user.get("requires_password_change")),
         "created_at": user.get("created_at"),
     }
 
@@ -743,8 +1002,11 @@ async def list_users(role: Optional[str] = None, college_id: Optional[str] = Non
     return {"users": [_serialize_user(u) for u in users]}
 
 
-@app.post("/api/users", dependencies=[Depends(require_role("ministry_admin", "college_admin"))])
-async def create_user_endpoint(payload: UserCreate):
+@app.post("/api/users")
+async def create_user_endpoint(
+    payload: UserCreate,
+    current_user: dict = Depends(require_role("ministry_admin", "college_admin")),
+):
     db = get_db()
     email = payload.email.strip().lower()
     name = payload.name.strip()
@@ -758,11 +1020,23 @@ async def create_user_endpoint(payload: UserCreate):
     if payload.role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(sorted(valid_roles))}")
 
+    user_id = str(uuid.uuid4())
+
+    # --- Admin Self-Lock -------------------------------------------------
+    # An admin can never create/re-register their own account under a different
+    # role (self role change / privilege escalation or demotion).
+    if current_user["user_id"] == user_id and current_user["role"] != payload.role:
+        raise HTTPException(status_code=403, detail="Admins cannot modify their own roles.")
+
+    self_record = db.get_user_by_id(current_user["user_id"])
+    if self_record and self_record.get("email") == email and current_user["role"] != payload.role:
+        raise HTTPException(status_code=403, detail="Admins cannot modify their own roles.")
+    # ---------------------------------------------------------------------
+
     if db.get_user_by_email(email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     password_hash = bcrypt.hashpw(payload.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    user_id = str(uuid.uuid4())
     db.create_user(user_id, name, email, password_hash, payload.role, payload.college_id)
     user = db.get_user_by_id(user_id)
     return _serialize_user(user)
@@ -777,12 +1051,24 @@ async def get_user(user_id: str):
     return _serialize_user(user)
 
 
-@app.put("/api/users/{user_id}", dependencies=[Depends(require_role("ministry_admin", "college_admin"))])
-async def update_user_endpoint(user_id: str, payload: UserUpdate):
+@app.put("/api/users/{user_id}")
+async def update_user_endpoint(
+    user_id: str,
+    payload: UserUpdate,
+    current_user: dict = Depends(require_role("ministry_admin", "college_admin")),
+):
     db = get_db()
     existing = db.get_user_by_id(user_id)
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # --- Admin Self-Lock -------------------------------------------------
+    # Admins are forbidden from modifying their own role. The check only fires
+    # when a role change is actually requested, so admins can still update their
+    # own name / password / college assignment.
+    if payload.role is not None and current_user["user_id"] == user_id and current_user["role"] != payload.role:
+        raise HTTPException(status_code=403, detail="Admins cannot modify their own roles.")
+    # ---------------------------------------------------------------------
 
     if payload.email is not None:
         email = payload.email.strip().lower()
@@ -804,6 +1090,9 @@ async def update_user_endpoint(user_id: str, payload: UserUpdate):
         fields["role"] = payload.role
     if payload.college_id is not None:
         fields["college_id"] = payload.college_id
+    if payload.requires_password_change is not None:
+        # Lets an admin force a staff account to reset its password at next login.
+        fields["requires_password_change"] = payload.requires_password_change
 
     if fields:
         db.update_user(user_id, **fields)
@@ -836,11 +1125,23 @@ async def health_check():
     }
 
 
-@app.get("/api/plagiarism/projects")
+@app.get("/api/plagiarism/projects", dependencies=[Depends(require_role())])
 async def list_projects():
     db = get_db()
     projects = db.get_all_projects()
-    return {"projects": projects}
+
+    # The Faculty Approval UI drives off `status`, and students may only see
+    # their own submissions via `student_id`. Guarantee both keys exist on every
+    # row (older rows predate the student_id column and may hold NULLs).
+    serialized = []
+    for project in projects:
+        item = dict(project)
+        if not item.get("status"):
+            item["status"] = "approved"
+        item.setdefault("student_id", None)
+        serialized.append(item)
+
+    return {"projects": serialized}
 
 
 class ProjectUpdate(BaseModel):
@@ -853,7 +1154,7 @@ class ProjectUpdate(BaseModel):
     status: Optional[str] = None
 
 
-@app.put("/api/plagiarism/projects/{project_id}")
+@app.put("/api/plagiarism/projects/{project_id}", dependencies=[Depends(require_role())])
 async def update_project(project_id: str, payload: ProjectUpdate):
     db = get_db()
     existing = db.get_project_by_id(project_id)
@@ -872,17 +1173,48 @@ async def update_project(project_id: str, payload: ProjectUpdate):
     return db.get_project_by_id(project_id)
 
 
-@app.delete("/api/plagiarism/projects/{project_id}")
+@app.post("/api/plagiarism/projects/{project_id}/approve", dependencies=[Depends(require_role("ministry_admin", "college_admin", "faculty"))])
+async def approve_project(project_id: str):
+    """Faculty approval workflow: flip a pending project's status to 'approved'."""
+    db = get_db()
+    conn = db._get_connection()
+    try:
+        cursor = conn.cursor()
+        # psycopg2 and sqlite3 use different parameter placeholders.
+        placeholder = "%s" if db.mode == "postgresql" else "?"
+        cursor.execute(f"UPDATE projects SET status = 'approved' WHERE id = {placeholder}", (project_id,))
+        if cursor.rowcount == 0:
+            conn.rollback()
+            raise HTTPException(404, "Project not found")
+        conn.commit()
+    finally:
+        conn.close()
+    return {"detail": "Project approved successfully"}
+
+
+@app.delete("/api/plagiarism/projects/{project_id}", dependencies=[Depends(require_role())])
 async def delete_project(project_id: str):
     db = get_db()
     existing = db.get_project_by_id(project_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Project not found")
     db.delete_project(project_id)
+
+    # Clean up the project's embeddings from the FAISS vector store as well.
+    # Runs in an executor so index I/O never blocks the event loop; a failure
+    # here must not fail the (already completed) DB deletion.
+    try:
+        vstore = get_vstore()
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: vstore.delete_project(project_id)
+        )
+    except Exception as e:
+        print(f"FAISS cleanup warning for project '{project_id}': {e}")
+
     return {"detail": "Project deleted"}
 
 
-@app.get("/api/plagiarism/projects/{project_id}/files")
+@app.get("/api/plagiarism/projects/{project_id}/files", dependencies=[Depends(require_role())])
 async def list_project_files(project_id: str):
     db = get_db()
     existing = db.get_project_by_id(project_id)
@@ -900,8 +1232,88 @@ async def check_projects(names: str):
     return existing
 
 
+# --- Scan history (list / detail / delete) ---
+def _history_summary(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Project a stored scan report down to the keys the frontend history list uses."""
+    return {
+        "id": entry.get("id", ""),
+        "project_name": entry.get("project_name", ""),
+        "scan_type": entry.get("scan_type", ""),
+        "overall_similarity": entry.get("overall_similarity", 0),
+        "code_similarity": entry.get("code_similarity", 0),
+        "text_similarity": entry.get("text_similarity", 0),
+        "verdict": entry.get("verdict", "SAFE"),
+        "total_files": entry.get("total_files", 0),
+        "total_loc": entry.get("total_loc", 0),
+        "timestamp": entry.get("timestamp", ""),
+    }
+
+
+def _find_history_report(report_id: str) -> Optional[Dict[str, Any]]:
+    """Look up a stored report by scan id, falling back to a project's newest scan.
+
+    The frontend "Inspect" button navigates with `?project=<project_name || id>`,
+    so the lookup key may be a project name instead of a scan id.
+    """
+    history = _load_history()
+    for entry in history:
+        if entry.get("id") == report_id:
+            return entry
+    # New scans are prepended, so the first match is the most recent one.
+    for entry in history:
+        if entry.get("project_name") == report_id:
+            return entry
+    return None
+
+
+@app.get("/api/plagiarism/history", dependencies=[Depends(require_role())])
+async def get_scan_history():
+    """Return every stored scan report as a lightweight summary list."""
+    history = _load_history()
+    return {"reports": [_history_summary(entry) for entry in history]}
+
+
+@app.get("/api/plagiarism/history/{report_id}", dependencies=[Depends(require_role())])
+async def get_scan_history_detail(report_id: str):
+    """Return one full scan report (comparisons, stats, languages, git metadata)."""
+    entry = _find_history_report(report_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Scan report '{report_id}' not found")
+
+    report = dict(entry)
+    # Guarantee the keys the report page reads so it never crashes on old records.
+    report.setdefault("status", "completed")
+    report.setdefault("id", report_id)
+    report.setdefault("project_name", "")
+    report.setdefault("scan_type", "")
+    report.setdefault("overall_similarity", 0)
+    report.setdefault("code_similarity", 0)
+    report.setdefault("text_similarity", 0)
+    report.setdefault("verdict", "SAFE")
+    report.setdefault("threshold", 65)
+    report.setdefault("comparisons", [])
+    report.setdefault("code_files_count", 0)
+    report.setdefault("text_files_count", 0)
+    report.setdefault("total_files", 0)
+    report.setdefault("total_loc", 0)
+    report.setdefault("languages_detected", [])
+    report.setdefault("timestamp", "")
+    return report
+
+
+@app.delete("/api/plagiarism/history/{report_id}", dependencies=[Depends(require_role())])
+async def delete_scan_history_report(report_id: str):
+    """Delete a single stored scan report."""
+    history = _load_history()
+    remaining = [entry for entry in history if entry.get("id") != report_id]
+    if len(remaining) == len(history):
+        raise HTTPException(status_code=404, detail=f"Scan report '{report_id}' not found")
+    _save_history(remaining)
+    return {"status": "success", "message": f"Scan report '{report_id}' deleted"}
+
+
 # --- Upload + Scan (JSON response) ---
-@app.post("/api/plagiarism/upload-scan")
+@app.post("/api/plagiarism/upload-scan", dependencies=[Depends(require_role())])
 async def upload_and_scan(
     project_name: str = Form(...),
     scan_type: str = Form("Direct Upload Project Scan"),
@@ -921,12 +1333,16 @@ async def upload_and_scan(
             "content": content,
         })
 
-    result = _run_intake(project_name, extracted_files)
+    # Run the CPU/IO-heavy fingerprinting + comparison work in a worker thread so the
+    # async event loop is never blocked (mirrors the streaming endpoints' behaviour).
+    result = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: _run_intake(project_name, extracted_files)
+    )
     return result
 
 
 # --- Upload + Scan (SSE Streaming) ---
-@app.post("/api/plagiarism/upload-scan-stream")
+@app.post("/api/plagiarism/upload-scan-stream", dependencies=[Depends(require_role())])
 async def upload_and_scan_stream(
     project_name: str = Form(...),
     scan_type: str = Form("Direct Upload Project Scan"),
@@ -949,33 +1365,33 @@ async def upload_and_scan_stream(
         })
 
     async def event_stream():
-        logs = []
+        q = asyncio.Queue()
+        loop = asyncio.get_running_loop()
 
         def log_callback(msg: str):
-            logs.append(msg)
+            loop.call_soon_threadsafe(q.put_nowait, {"type": "log", "text": msg})
 
-        try:
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: _run_intake(project_name, extracted_files, log_callback=log_callback),
-            )
+        def run_intake():
+            try:
+                res = _run_intake(project_name, extracted_files, log_callback=log_callback)
+                loop.call_soon_threadsafe(q.put_nowait, {"type": "complete", "result": res})
+            except Exception as e:
+                loop.call_soon_threadsafe(q.put_nowait, {"type": "error", "message": str(e)})
 
-            # Emit all logs
-            for log_msg in logs:
-                yield f"data: {json.dumps({'type': 'log', 'text': log_msg})}\n\n"
-                await asyncio.sleep(0.01)
+        # Start the background thread
+        executor_task = loop.run_in_executor(None, run_intake)
 
-            # Emit final result
-            yield f"data: {json.dumps({'type': 'complete', 'result': result}, default=str)}\n\n"
-
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        while True:
+            event = await q.get()
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+            if event["type"] in ("complete", "error"):
+                break
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 # --- Upload + Scan ZIP Archive (SSE Streaming) ---
-@app.post("/api/plagiarism/upload-zip-stream")
+@app.post("/api/plagiarism/upload-zip-stream", dependencies=[Depends(require_role())])
 async def upload_zip_stream(
     project_name: str = Form(...),
     scan_type: str = Form("ZIP Archive Scan"),
@@ -986,47 +1402,69 @@ async def upload_zip_stream(
     tmp_dir = tempfile.mkdtemp(prefix="plagiarism_zip_")
 
     async def event_stream():
-        logs = []
+        q = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
         def log_callback(msg: str):
-            logs.append(msg)
+            loop.call_soon_threadsafe(q.put_nowait, {"type": "log", "text": msg})
 
-        try:
-            log_callback(f"📦 Extracting ZIP archive '{file.filename}'...")
-            zip_path = os.path.join(tmp_dir, "upload.zip")
-            with open(zip_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+        def run_zip_intake():
+            try:
+                log_callback(f"📦 Extracting ZIP archive '{file.filename}'...")
+                zip_path = os.path.join(tmp_dir, "upload.zip")
+                with open(zip_path, "wb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
 
-            extract_dir = os.path.join(tmp_dir, "extracted")
-            os.makedirs(extract_dir, exist_ok=True)
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(extract_dir)
+                extract_dir = os.path.join(tmp_dir, "extracted")
+                os.makedirs(extract_dir, exist_ok=True)
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    # --- Security: block Zip Slip (path traversal) before extraction ---
+                    for member_name in zip_ref.namelist():
+                        normalized = member_name.replace("\\", "/")
+                        if os.path.isabs(normalized) or ".." in normalized.split("/"):
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Unsafe path in ZIP archive: {member_name}",
+                            )
+                    zip_ref.extractall(extract_dir)
 
-            log_callback(f"📂 Scanning extracted project directory: {project_name}...")
-            extracted_files = FileExtractor.scan_project_directory(extract_dir)
-            
-            for f in extracted_files:
-                if "relative_path" not in f:
-                    f["relative_path"] = f.get("filename", "")
+                # --- Security: verify nothing escaped the extraction directory ---
+                extract_root = os.path.abspath(extract_dir)
+                for root, dirs, files in os.walk(extract_dir):
+                    for entry_name in list(dirs) + list(files):
+                        entry_path = os.path.abspath(os.path.join(root, entry_name))
+                        if not (entry_path == extract_root or entry_path.startswith(extract_root + os.sep)):
+                            shutil.rmtree(tmp_dir, ignore_errors=True)
+                            raise HTTPException(
+                                status_code=400,
+                                detail="Unsafe path detected in ZIP archive (path traversal blocked)",
+                            )
 
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: _run_intake(project_name, extracted_files, log_callback=log_callback),
-            )
+                log_callback(f"📂 Scanning extracted project directory: {project_name}...")
+                extracted_files = FileExtractor.scan_project_directory(extract_dir)
+                
+                for f in extracted_files:
+                    if "relative_path" not in f:
+                        f["relative_path"] = f.get("filename", "")
 
-            for log_msg in logs:
-                yield f"data: {json.dumps({'type': 'log', 'text': log_msg})}\n\n"
-                await asyncio.sleep(0.01)
+                res = _run_intake(project_name, extracted_files, log_callback=log_callback)
+                loop.call_soon_threadsafe(q.put_nowait, {"type": "complete", "result": res})
+            except Exception as e:
+                loop.call_soon_threadsafe(q.put_nowait, {"type": "error", "message": str(e)})
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
 
-            yield f"data: {json.dumps({'type': 'complete', 'result': result}, default=str)}\n\n"
+        executor_task = loop.run_in_executor(None, run_zip_intake)
 
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-        finally:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+        while True:
+            event = await q.get()
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+            if event["type"] in ("complete", "error"):
+                break
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 # --- Git Repo Scan (JSON) ---
-@app.post("/api/plagiarism/git-scan")
+@app.post("/api/plagiarism/git-scan", dependencies=[Depends(require_role())])
 async def git_scan(payload: GitScanRequest):
     tmp_dir, git_metadata = _clone_git_repo(payload.repo_url, payload.branch or "main", payload.access_token)
 
@@ -1046,57 +1484,56 @@ async def git_scan(payload: GitScanRequest):
 
 
 # --- Git Repo Scan (SSE Streaming) ---
-@app.post("/api/plagiarism/git-scan-stream")
+@app.post("/api/plagiarism/git-scan-stream", dependencies=[Depends(require_role())])
 async def git_scan_stream(payload: GitScanRequest):
 
     async def event_stream():
-        logs = []
+        q = asyncio.Queue()
+        loop = asyncio.get_running_loop()
 
         def log_callback(msg: str):
-            logs.append(msg)
+            loop.call_soon_threadsafe(q.put_nowait, {"type": "log", "text": msg})
 
-        tmp_dir = None
-        try:
-            tmp_dir, git_metadata = _clone_git_repo(
-                payload.repo_url, payload.branch or "main", payload.access_token, log_callback=log_callback
-            )
+        def run_git_intake():
+            tmp_dir = None
+            try:
+                tmp_dir, git_metadata = _clone_git_repo(
+                    payload.repo_url, payload.branch or "main", payload.access_token, log_callback=log_callback
+                )
 
-            project_name = payload.project_name or Path(payload.repo_url.rstrip("/")).stem
-            log_callback(f"📂 Scanning project directory: {project_name}...")
-            extracted_files = FileExtractor.scan_project_directory(tmp_dir)
+                project_name = payload.project_name or Path(payload.repo_url.rstrip("/")).stem
+                log_callback(f"📂 Scanning project directory: {project_name}...")
+                extracted_files = FileExtractor.scan_project_directory(tmp_dir)
 
-            for f in extracted_files:
-                if "relative_path" not in f:
-                    f["relative_path"] = f.get("filename", "")
+                for f in extracted_files:
+                    if "relative_path" not in f:
+                        f["relative_path"] = f.get("filename", "")
 
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: _run_intake(
+                res = _run_intake(
                     project_name, extracted_files,
                     log_callback=log_callback,
                     git_metadata=git_metadata,
-                ),
-            )
+                )
+                loop.call_soon_threadsafe(q.put_nowait, {"type": "complete", "result": res})
+            except Exception as e:
+                loop.call_soon_threadsafe(q.put_nowait, {"type": "error", "message": str(e)})
+            finally:
+                if tmp_dir:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
 
-            for log_msg in logs:
-                yield f"data: {json.dumps({'type': 'log', 'text': log_msg})}\n\n"
-                await asyncio.sleep(0.01)
+        executor_task = loop.run_in_executor(None, run_git_intake)
 
-            yield f"data: {json.dumps({'type': 'complete', 'result': result}, default=str)}\n\n"
-
-        except Exception as e:
-            for log_msg in logs:
-                yield f"data: {json.dumps({'type': 'log', 'text': log_msg})}\n\n"
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-        finally:
-            if tmp_dir:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
+        while True:
+            event = await q.get()
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+            if event["type"] in ("complete", "error"):
+                break
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 # --- Named scan on already-indexed project ---
-@app.post("/api/plagiarism/scan")
+@app.post("/api/plagiarism/scan", dependencies=[Depends(require_role())])
 async def run_scan(req: ScanRequest):
     db = get_db()
     target = req.target
@@ -1115,7 +1552,7 @@ async def run_scan(req: ScanRequest):
 async def dashboard_stats():
     db = get_db()
     history = _load_history()
-    recent_scans = history[-10:] if history else []
+    recent_scans = history[::-1][:10] if history else []
     flagged_count = sum(1 for h in history if h.get("verdict") == "FLAGGED")
     return {
         "total_projects": db.count_projects(),
@@ -1128,10 +1565,15 @@ async def dashboard_stats():
 
 
 class DeepScanRequest(BaseModel):
-    project_id: str
+    # `project_id` is the baseline (source) project the report was produced from.
+    # `project_name` / `target` are accepted as aliases so callers that only know
+    # the project name (e.g. a report loaded from history) still work.
+    project_id: Optional[str] = None
     file1_path: str
-    other_project_id: str
+    other_project_id: Optional[str] = None
     file2_path: str
+    project_name: Optional[str] = None
+    target: Optional[str] = None
 
 
 def _cosine_similarity(a, b) -> float:
@@ -1152,13 +1594,40 @@ def _resolve_file_type(relative_path: str) -> str:
     return "code" if ext in CODE_EXTENSIONS else "text"
 
 
-@app.post("/api/plagiarism/deep-scan")
+@app.post("/api/plagiarism/deep-scan", dependencies=[Depends(require_role())])
 async def deep_scan(req: DeepScanRequest):
     db = get_db()
 
+    # --- 0. Resolve the baseline project id from the JSON payload -----------
+    project_id = (req.project_id or req.project_name or req.target or "").strip()
+    other_project_id = (req.other_project_id or "").strip()
+    if not project_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing 'project_id' (the baseline project) in the request payload.",
+        )
+    if not other_project_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing 'other_project_id' (the matched project) in the request payload.",
+        )
+    if not req.file1_path or not req.file2_path:
+        raise HTTPException(
+            status_code=400,
+            detail="Both 'file1_path' and 'file2_path' are required.",
+        )
+
     # --- 1. Load both files' content from the database ----------------------
-    files1 = db.get_project_files(req.project_id)
-    files2 = db.get_project_files(req.other_project_id)
+    files1 = db.get_project_files(project_id)
+    files2 = db.get_project_files(other_project_id)
+
+    if not files1:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found in database")
+    if not files2:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project '{other_project_id}' not found in database",
+        )
 
     file1 = next((f for f in files1 if f.get("relative_path") == req.file1_path), None)
     file2 = next((f for f in files2 if f.get("relative_path") == req.file2_path), None)
@@ -1166,12 +1635,12 @@ async def deep_scan(req: DeepScanRequest):
     if file1 is None:
         raise HTTPException(
             status_code=404,
-            detail=f"File '{req.file1_path}' not found in project '{req.project_id}'",
+            detail=f"File '{req.file1_path}' not found in project '{project_id}'",
         )
     if file2 is None:
         raise HTTPException(
             status_code=404,
-            detail=f"File '{req.file2_path}' not found in project '{req.other_project_id}'",
+            detail=f"File '{req.file2_path}' not found in project '{other_project_id}'",
         )
 
     content1 = file1.get("content", "") or ""
@@ -1195,14 +1664,17 @@ async def deep_scan(req: DeepScanRequest):
     model_name = "unixcoder-base" if file_type == "code" else "bge-m3"
     try:
         model = _get_deep_scan_model(model_name)
-        embeddings = model.encode(
-            [content1, content2],
-            convert_to_numpy=True,
-            normalize_embeddings=True,
+        embeddings = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: model.encode(
+                [content1, content2],
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+            )
         )
         similarity = _cosine_similarity(embeddings[0], embeddings[1])
     except FileNotFoundError:
-        raise
+        raise HTTPException(status_code=503, detail="SentenceTransformer model is not downloaded yet. Please wait.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Deep scan failed: {str(e)}")
 
@@ -1216,6 +1688,230 @@ async def deep_scan(req: DeepScanRequest):
         "verdict": verdict,
         "file1": req.file1_path,
         "file2": req.file2_path,
+    }
+
+
+class BulkDeepScanRequest(BaseModel):
+    project_id: str
+
+
+@app.post("/api/plagiarism/deep-scan-bulk", dependencies=[Depends(require_role())])
+async def deep_scan_bulk(req: BulkDeepScanRequest):
+    """FAISS bulk semantic scan: top-5 cross-project matches for every file of a project."""
+    project_id = (req.project_id or "").strip()
+    if not project_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing 'project_id' in the request payload.",
+        )
+
+    db = get_db()
+    if not db.get_project_by_id(project_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project '{project_id}' not found in database",
+        )
+
+    vstore = get_vstore()
+    try:
+        matches = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: vstore.search_bulk(project_id)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Bulk deep scan failed: {str(e)}")
+
+    return {
+        "project_id": project_id,
+        "match_count": len(matches),
+        "matches": matches,
+    }
+
+
+class ProjectComparisonRequest(BaseModel):
+    project_a: str
+    project_b: str
+
+
+def _run_project_comparison(project_a: str, project_b: str) -> List[Dict[str, Any]]:
+    """Compare project_a against ONLY project_b using the fingerprint index.
+
+    For every file in project_a, queries the shared fingerprint index and
+    keeps only candidates belonging to project_b. Similarity is the overlap
+    coefficient: shared / min(file_a_fps, file_b_fps), which also catches
+    small files pasted inside larger ones. Matches below 20% are dropped
+    and results are sorted by highest similarity first.
+    """
+    db = get_db()
+    project_files = db.get_project_files(project_a)
+    file_fingerprints = db.get_project_fingerprints(project_a)
+
+    comparisons: List[Dict[str, Any]] = []
+    prefix = f"{project_b}::"
+
+    for f in project_files:
+        rel_path = f.get("relative_path", "")
+        ftype = f.get("file_type", "")
+        fps = file_fingerprints.get(rel_path, [])
+        if not rel_path or not fps or ftype not in ("code", "text"):
+            continue
+
+        fp_hashes = [h for h, _p in fps]
+        total_a_fps = len(fp_hashes)
+        if not total_a_fps:
+            continue
+
+        candidates = db.query_candidates(fp_hashes, ftype, project_a)
+
+        for key, shared in candidates.items():
+            # Restrict results STRICTLY to project_b.
+            if not key.startswith(prefix):
+                continue
+            other_path = key[len(prefix):]
+
+            total_b_fps = db.get_file_fingerprint_count(project_b, other_path)
+            if not total_b_fps:
+                continue
+
+            # Overlap coefficient: shared / min(source, target)
+            sim_val = min(shared / min(total_a_fps, total_b_fps), 1.0)
+            if sim_val < 0.20:  # Filter out weak matches below 20%
+                continue
+
+            comparisons.append({
+                "file_a": rel_path,
+                "file_b": other_path,
+                "similarity": round(sim_val * 100, 2),
+                "type": ftype,
+            })
+
+    comparisons.sort(key=lambda c: c["similarity"], reverse=True)
+    return comparisons
+
+
+@app.post("/api/plagiarism/compare-projects", dependencies=[Depends(require_role())])
+async def compare_projects(req: ProjectComparisonRequest):
+    """Direct project-to-project comparison: overlap matrix of matching files."""
+    project_a = (req.project_a or "").strip()
+    project_b = (req.project_b or "").strip()
+    if not project_a or not project_b:
+        raise HTTPException(
+            status_code=400,
+            detail="Both 'project_a' and 'project_b' are required.",
+        )
+    if project_a == project_b:
+        raise HTTPException(
+            status_code=400,
+            detail="'project_a' and 'project_b' must be different projects.",
+        )
+
+    db = get_db()
+    if not db.get_project_by_id(project_a):
+        raise HTTPException(status_code=404, detail=f"Project '{project_a}' not found in database")
+    if not db.get_project_by_id(project_b):
+        raise HTTPException(status_code=404, detail=f"Project '{project_b}' not found in database")
+
+    try:
+        comparisons = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: _run_project_comparison(project_a, project_b)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Project comparison failed: {str(e)}")
+
+    return {
+        "status": "completed",
+        "project_a": project_a,
+        "project_b": project_b,
+        "match_count": len(comparisons),
+        "comparisons": comparisons,
+    }
+
+
+class CompareFilesRequest(BaseModel):
+    project_a: str
+    file_a: str
+    project_b: str
+    file_b: str
+
+
+def _resolve_stored_file(project_id: str, relative_path: str) -> Optional[str]:
+    """Return the text content of one stored project file, or None if absent.
+
+    Looks on disk first (``data/project_files/<project>/<relative_path>``) and
+    then falls back to the database copy, which is where uploaded archives are
+    actually kept by ``db.save_project()``. The resolved path is verified to stay
+    inside the project folder so a crafted ``relative_path`` cannot escape it.
+    """
+    # --- 1. On-disk copy -----------------------------------------------------
+    project_root = os.path.realpath(
+        os.path.join(str(DATA_DIR), "project_files", project_id)
+    )
+    candidate = os.path.realpath(os.path.join(project_root, relative_path))
+    if candidate.startswith(project_root + os.sep) and os.path.isfile(candidate):
+        try:
+            with open(candidate, "r", encoding="utf-8", errors="replace") as fh:
+                return fh.read()
+        except OSError:
+            pass
+
+    # --- 2. Database copy (compressed project_files table) -------------------
+    db = get_db()
+    for f in db.get_project_files(project_id):
+        if f.get("relative_path") == relative_path:
+            return f.get("content", "") or ""
+    return None
+
+
+@app.post("/api/plagiarism/compare-files", dependencies=[Depends(require_role())])
+async def compare_files_endpoint(req: CompareFilesRequest):
+    """Line-level diff of two stored files, used by the visual Diff Viewer.
+
+    Returns both files split into lines plus the raw ``difflib`` opcodes
+    ``(tag, i1, i2, j1, j2)``; the frontend highlights every ``equal`` block
+    because identical lines are the plagiarism evidence.
+    """
+    project_a = (req.project_a or "").strip()
+    project_b = (req.project_b or "").strip()
+    file_a = (req.file_a or "").strip()
+    file_b = (req.file_b or "").strip()
+    if not project_a or not project_b or not file_a or not file_b:
+        raise HTTPException(
+            status_code=400,
+            detail="'project_a', 'file_a', 'project_b' and 'file_b' are all required.",
+        )
+
+    def _load() -> tuple:
+        return (
+            _resolve_stored_file(project_a, file_a),
+            _resolve_stored_file(project_b, file_b),
+        )
+
+    content_a, content_b = await asyncio.get_event_loop().run_in_executor(None, _load)
+
+    if content_a is None or content_b is None:
+        missing = []
+        if content_a is None:
+            missing.append(f"'{file_a}' in project '{project_a}'")
+        if content_b is None:
+            missing.append(f"'{file_b}' in project '{project_b}'")
+        raise HTTPException(404, f"One or both files not found on disk: {', '.join(missing)}")
+
+    lines_a = content_a.splitlines()
+    lines_b = content_b.splitlines()
+
+    matcher = difflib.SequenceMatcher(None, lines_a, lines_b)
+    opcodes = matcher.get_opcodes()  # list of tuples: (tag, i1, i2, j1, j2)
+    matched_lines = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in opcodes if tag == "equal")
+
+    return {
+        "project_a": project_a,
+        "project_b": project_b,
+        "file_a": file_a,
+        "file_b": file_b,
+        "lines_a": lines_a,
+        "lines_b": lines_b,
+        "opcodes": opcodes,
+        "matched_lines": matched_lines,
+        "match_ratio": round(matcher.ratio() * 100, 2),
     }
 
 

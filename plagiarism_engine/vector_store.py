@@ -1,9 +1,29 @@
+"""
+FAISS-powered multilingual vector store for the plagiarism engine.
+
+Replaces the previous ChromaDB implementation with two in-process FAISS
+indices (one for ``code``, one for ``text``) for higher performance and
+full offline stability:
+
+  - Each index is an ``IndexIDMap(IndexFlatIP(dim))``:
+      * ``IndexFlatIP`` over L2-normalized embeddings == cosine similarity
+      * ``IndexIDMap`` gives stable int64 IDs and supports ``remove_ids``
+  - FAISS only accepts 64-bit integer IDs, so a JSON mapping file
+    (``data/faiss_mapping.json``) maps those IDs to
+    ``{"project_id": str, "file_path": str}`` and vice versa.
+  - Indices are persisted with ``faiss.write_index`` next to the mapping
+    file and reloaded automatically on startup.
+"""
+
 import os
 import re
+import json
+import threading
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union
-import chromadb
-import os
+from typing import List, Dict, Any, Optional
+
+import numpy as np
+import faiss
 from sentence_transformers import SentenceTransformer
 
 MODELS_DIR = Path(os.environ.get('MODELS_DIR', os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models')))
@@ -68,274 +88,340 @@ class LazyModelPool:
 # Global Singleton Lazy Model Pool
 model_pool = LazyModelPool()
 
-class MultilingualVectorStore:
+# Domains served by the store; each one gets its own isolated FAISS index.
+DOMAINS = ("code", "text")
+
+# LazyModelPool key used to embed each domain.
+DOMAIN_MODEL_KEYS = {"code": "code", "text": "bge_m3"}
+
+# Default number of cross-project matches returned per file by search_bulk().
+DEFAULT_TOP_K = 5
+
+
+class VectorStore:
     """
-    Production Multilingual Vector Store utilizing ChromaDB with Cosine Distance.
-    Features Task-Based Model Dispatching, Domain Isolation, and Multilingual Ensemble Processing.
+    Production FAISS Vector Store with Cosine Similarity (normalized Inner Product).
+
+    Maintains two domain-isolated indices (``code`` and ``text``), each an
+    ``IndexIDMap(IndexFlatIP(dim))`` so vectors keep stable int64 IDs and can
+    be removed per project via ``remove_ids``. A JSON sidecar file maps every
+    int64 ID to ``{"project_id": str, "file_path": str}`` and back.
     """
 
     def __init__(
-        self, 
-        collection_name: str = "streamlit_vector_db", 
-        persist_directory: Optional[str] = "./chroma_app_db",
-        model_name: Optional[str] = None
+        self,
+        index_dir: str = "./data/faiss_index",
+        mapping_path: str = "./data/faiss_mapping.json",
     ):
-        self.collection_name = collection_name
-        self.persist_directory = persist_directory
+        self.index_dir = Path(index_dir)
+        self.mapping_path = Path(mapping_path)
+        self.index_dir.mkdir(parents=True, exist_ok=True)
+        self.mapping_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Initialize Persistent ChromaDB Client
-        if self.persist_directory:
-            Path(self.persist_directory).mkdir(parents=True, exist_ok=True)
-            self.client = chromadb.PersistentClient(path=self.persist_directory)
-        else:
-            self.client = chromadb.Client()
+        self._lock = threading.Lock()
+        self._indices: Dict[str, Optional[faiss.Index]] = {d: None for d in DOMAINS}
 
-        # Domain Isolated Collections
-        self.code_collection = self.client.get_or_create_collection(
-            name="chroma_code_db",
-            metadata={"hnsw:space": "cosine"}
+        # int64 id -> {"project_id", "file_path", "domain"} (+ next_id counter, dims)
+        self._mapping: Dict[str, Any] = self._load_mapping()
+
+        # Reload persisted FAISS indices from disk (created lazily otherwise).
+        for domain in DOMAINS:
+            path = self._index_path(domain)
+            if path.exists():
+                try:
+                    self._indices[domain] = faiss.read_index(str(path))
+                except Exception:
+                    self._indices[domain] = None
+
+    # ------------------------------------------------------------------
+    # Persistence helpers (JSON ID mapping + FAISS index files)
+    # ------------------------------------------------------------------
+    def _load_mapping(self) -> Dict[str, Any]:
+        """Load the JSON mapping file (int64 id <-> project/file metadata)."""
+        if self.mapping_path.exists():
+            try:
+                data = json.loads(self.mapping_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and isinstance(data.get("vectors"), dict):
+                    data.setdefault("next_id", 1)
+                    data.setdefault("dims", {})
+                    return data
+            except Exception:
+                pass
+        return {"next_id": 1, "dims": {}, "vectors": {}}
+
+    def _save_mapping(self) -> None:
+        """Atomically persist the JSON mapping file."""
+        tmp_path = self.mapping_path.with_suffix(".json.tmp")
+        tmp_path.write_text(
+            json.dumps(self._mapping, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
-        self.docs_collection = self.client.get_or_create_collection(
-            name="chroma_multilingual_docs_db",
-            metadata={"hnsw:space": "cosine"}
-        )
+        os.replace(tmp_path, self.mapping_path)
 
-    def generate_code_embedding(self, code_text: str) -> List[float]:
-        """Generate vector embedding for code using codebert-base."""
-        model = model_pool.get_model("code") or model_pool.get_model("minilm")
-        if not model or not code_text or not code_text.strip():
-            dim = model_pool.get_model_dimension("code")
-            return [0.0] * dim
-        embedding = model.encode(code_text[:4000], convert_to_numpy=True)
-        return embedding.tolist()
+    def _index_path(self, domain: str) -> Path:
+        return self.index_dir / f"{domain}.index"
 
-    def generate_multilingual_doc_embedding(self, text: str) -> List[float]:
+    def _persist_index(self, domain: str) -> None:
+        """Write a domain's FAISS index to disk (caller holds the lock)."""
+        index = self._indices.get(domain)
+        if index is not None:
+            faiss.write_index(index, str(self._index_path(domain)))
+
+    def _get_index(self, domain: str, dim: Optional[int] = None) -> faiss.Index:
         """
-        Multilingual Ensemble Embedding Pipeline for Mixed Arabic & English Documents.
-        Combines bge-m3 / minilm, LaBSE (cross-lingual), and arabertv02 (if Arabic text present).
+        Return the domain index, creating it lazily as
+        ``IndexIDMap(IndexFlatIP(dim))`` (caller holds the lock).
         """
-        if not text or not text.strip():
-            dim = model_pool.get_model_dimension("bge_m3")
-            return [0.0] * dim
+        index = self._indices.get(domain)
+        if index is not None:
+            return index
 
-        # Primary Multilingual Model (bge-m3 or minilm)
-        primary_model = model_pool.get_model("bge_m3") or model_pool.get_model("minilm")
-        emb = primary_model.encode(text[:4000], convert_to_numpy=True)
+        if not dim:
+            dim = self._mapping.get("dims", {}).get(domain)
+        if not dim:
+            dim = model_pool.get_model_dimension(DOMAIN_MODEL_KEYS[domain])
 
-        # If Arabic text present, combine with LaBSE / AraBERT for cross-lingual alignment
-        if is_arabic_text(text):
-            labse_model = model_pool.get_model("labse")
-            if labse_model:
-                labse_emb = labse_model.encode(text[:4000], convert_to_numpy=True)
-                if len(emb) == len(labse_emb):
-                    emb = ((emb + labse_emb) / 2.0)
+        index = faiss.IndexIDMap(faiss.IndexFlatIP(int(dim)))
+        self._indices[domain] = index
+        self._mapping.setdefault("dims", {})[domain] = int(index.d)
+        return index
 
-        return emb.tolist()
+    def _next_id(self) -> int:
+        """Allocate the next unique int64 ID (caller holds the lock)."""
+        new_id = int(self._mapping.get("next_id", 1))
+        self._mapping["next_id"] = new_id + 1
+        return new_id
 
-    def upsert_code_file(self, doc_id: str, code_text: str, metadata: Dict[str, Any]) -> None:
-        """Upsert source code into isolated Code ChromaDB collection."""
-        if not code_text or not code_text.strip():
-            return
-        embedding = self.generate_code_embedding(code_text)
-        meta = metadata or {}
-        meta["doc_id"] = doc_id
-        meta["domain"] = "code"
-
-        self.code_collection.upsert(
-            ids=[doc_id],
-            embeddings=[embedding],
-            metadatas=[meta],
-            documents=[code_text[:2000]]
-        )
-
-    def upsert_doc_file(self, doc_id: str, doc_text: str, metadata: Dict[str, Any]) -> None:
-        """Upsert mixed Arabic/English text document into Multilingual Docs ChromaDB collection."""
-        if not doc_text or not doc_text.strip():
-            return
-        embedding = self.generate_multilingual_doc_embedding(doc_text)
-        meta = metadata or {}
-        meta["doc_id"] = doc_id
-        meta["domain"] = "text_multilingual"
-        meta["has_arabic"] = is_arabic_text(doc_text)
-
-        self.docs_collection.upsert(
-            ids=[doc_id],
-            embeddings=[embedding],
-            metadatas=[meta],
-            documents=[doc_text[:2000]]
-        )
-
+    # ------------------------------------------------------------------
+    # Indexing
+    # ------------------------------------------------------------------
     def index_project_files(
-        self, 
-        project_files: List[Dict[str, Any]], 
-        project_id: str,
-        log_callback: Optional[Any] = None
-    ) -> None:
-        """
-        Task-Based Dispatching Indexer using Batch Processing.
-        Routes code files strictly to CodeBERT & Code Collection,
-        and text files strictly to Multilingual Document Ensemble.
-        """
-        batch_size = 32
-        
-        # Split into code and text files
-        code_files = [f for f in project_files if f.get('file_type', 'text') == 'code']
-        text_files = [f for f in project_files if f.get('file_type', 'text') != 'code']
-        
-        # Process code files in batches
-        code_model = model_pool.get_model("code") or model_pool.get_model("minilm")
-        if code_model and code_files:
-            if log_callback:
-                log_callback(f"  🤖 [Batch] Encoding {len(code_files)} code files...")
-            
-            for i in range(0, len(code_files), batch_size):
-                batch = code_files[i:i+batch_size]
-                contents = [f.get('content', '')[:4000] for f in batch]
-                embeddings = code_model.encode(contents, batch_size=batch_size, convert_to_numpy=True)
-                
-                for j, file_rec in enumerate(batch):
-                    file_id = f"{project_id}::{file_rec.get('relative_path', file_rec['filename'])}"
-                    meta = {
-                        "project_id": project_id,
-                        "filename": file_rec['filename'],
-                        "file_type": 'code',
-                        "extension": file_rec.get('extension', ''),
-                        "doc_id": file_id,
-                        "domain": "code"
-                    }
-                    self.code_collection.upsert(
-                        ids=[file_id],
-                        embeddings=[embeddings[j].tolist()],
-                        metadatas=[meta],
-                        documents=[file_rec.get('content', '')[:2000]]
-                    )
-
-        # Process text files in batches
-        text_model = model_pool.get_model("bge_m3") or model_pool.get_model("minilm")
-        if text_model and text_files:
-            if log_callback:
-                log_callback(f"  🤖 [Batch] Encoding {len(text_files)} text files...")
-                
-            for i in range(0, len(text_files), batch_size):
-                batch = text_files[i:i+batch_size]
-                contents = [f.get('content', '')[:4000] for f in batch]
-                embeddings = text_model.encode(contents, batch_size=batch_size, convert_to_numpy=True)
-                
-                for j, file_rec in enumerate(batch):
-                    content = file_rec.get('content', '')
-                    has_ar = is_arabic_text(content)
-                    
-                    # Apply cross-lingual Arabic alignment if needed
-                    emb = embeddings[j]
-                    if has_ar:
-                        labse_model = model_pool.get_model("labse")
-                        if labse_model:
-                            labse_emb = labse_model.encode(content[:4000], convert_to_numpy=True)
-                            if len(emb) == len(labse_emb):
-                                emb = ((emb + labse_emb) / 2.0)
-                                
-                    file_id = f"{project_id}::{file_rec.get('relative_path', file_rec['filename'])}"
-                    meta = {
-                        "project_id": project_id,
-                        "filename": file_rec['filename'],
-                        "file_type": 'text',
-                        "extension": file_rec.get('extension', ''),
-                        "doc_id": file_id,
-                        "domain": "text_multilingual",
-                        "has_arabic": has_ar
-                    }
-                    self.docs_collection.upsert(
-                        ids=[file_id],
-                        embeddings=[emb.tolist()],
-                        metadatas=[meta],
-                        documents=[content[:2000]]
-                    )
-
-    def batch_index_project_files(
         self,
         project_files: List[Dict[str, Any]],
         project_id: str,
-        batch_size: int = 64,
-        log_callback: Optional[Any] = None
-    ) -> None:
+        log_callback: Optional[Any] = None,
+    ) -> Dict[str, int]:
         """
-        High-performance batch indexer using SentenceTransformer's native batch encoding.
-        Encodes documents in batches of `batch_size` (default 64) instead of one at a time,
-        significantly reducing per-document overhead for large corpora (100K+ files).
-        """
-        code_files = []
-        text_files = []
+        Task-Based Dispatching Indexer using FAISS + Batch Processing.
 
-        # 1. Separate files by type
+        Routes code files strictly to the CodeBERT model & ``code`` index,
+        and text files strictly to the BGE-M3 model & ``text`` index.
+        Embeddings are L2-normalized so IndexFlatIP == cosine similarity.
+        Every vector gets a unique int64 ID recorded in the JSON mapping.
+        """
+        batch_size = 32
+
+        code_files: List[Dict[str, Any]] = []
+        text_files: List[Dict[str, Any]] = []
         for file_rec in project_files:
-            file_type = file_rec.get('file_type', 'text')
             content = file_rec.get('content', '')
             if not content or not content.strip():
                 continue
-            if file_type == 'code':
+            if file_rec.get('file_type', 'text') == 'code':
                 code_files.append(file_rec)
             else:
                 text_files.append(file_rec)
 
-        # 2. Batch encode code files
+        added = {"code": 0, "text": 0}
         if code_files:
-            code_model = model_pool.get_model("code") or model_pool.get_model("minilm")
-            if code_model:
-                if log_callback:
-                    log_callback(f"  🤖 [Batch] Encoding {len(code_files)} code files in batches of {batch_size}...")
-
-                for i in range(0, len(code_files), batch_size):
-                    batch = code_files[i:i + batch_size]
-                    texts = [f.get('content', '')[:4000] for f in batch]
-                    embeddings = code_model.encode(texts, convert_to_numpy=True, batch_size=batch_size)
-
-                    for j, file_rec in enumerate(batch):
-                        file_id = f"{project_id}::{file_rec.get('relative_path', file_rec['filename'])}"
-                        meta = {
-                            "project_id": project_id,
-                            "filename": file_rec['filename'],
-                            "file_type": 'code',
-                            "extension": file_rec.get('extension', ''),
-                            "doc_id": file_id,
-                            "domain": "code"
-                        }
-                        self.code_collection.upsert(
-                            ids=[file_id],
-                            embeddings=[embeddings[j].tolist()],
-                            metadatas=[meta],
-                            documents=[file_rec.get('content', '')[:2000]]
-                        )
-
-        # 3. Batch encode text files
+            added["code"] = self._encode_and_add(
+                code_files, project_id, "code", batch_size, log_callback
+            )
         if text_files:
-            text_model = model_pool.get_model("bge_m3") or model_pool.get_model("minilm")
-            if text_model:
-                if log_callback:
-                    log_callback(f"  🤖 [Batch] Encoding {len(text_files)} text files in batches of {batch_size}...")
+            added["text"] = self._encode_and_add(
+                text_files, project_id, "text", batch_size, log_callback
+            )
 
-                for i in range(0, len(text_files), batch_size):
-                    batch = text_files[i:i + batch_size]
-                    texts = [f.get('content', '')[:4000] for f in batch]
-                    embeddings = text_model.encode(texts, convert_to_numpy=True, batch_size=batch_size)
+        if log_callback:
+            log_callback(
+                f"  ✅ [FAISS] Indexed {added['code']} code + {added['text']} text vectors "
+                f"for project '{project_id}'."
+            )
+        return added
 
-                    for j, file_rec in enumerate(batch):
-                        file_id = f"{project_id}::{file_rec.get('relative_path', file_rec['filename'])}"
-                        meta = {
-                            "project_id": project_id,
-                            "filename": file_rec['filename'],
-                            "file_type": 'text',
-                            "extension": file_rec.get('extension', ''),
-                            "doc_id": file_id,
-                            "domain": "text_multilingual",
-                            "has_arabic": is_arabic_text(file_rec.get('content', ''))
-                        }
-                        self.docs_collection.upsert(
-                            ids=[file_id],
-                            embeddings=[embeddings[j].tolist()],
-                            metadatas=[meta],
-                            documents=[file_rec.get('content', '')[:2000]]
-                        )
+    def _encode_and_add(
+        self,
+        files: List[Dict[str, Any]],
+        project_id: str,
+        domain: str,
+        batch_size: int,
+        log_callback: Optional[Any],
+    ) -> int:
+        """Encode one domain's files in batches and add them to its FAISS index."""
+        model = model_pool.get_model(DOMAIN_MODEL_KEYS[domain]) or model_pool.get_model("minilm")
+        if model is None:
+            if log_callback:
+                log_callback(
+                    f"  ⚠️ [FAISS] No embedding model available for '{domain}' domain; "
+                    f"skipping {len(files)} files."
+                )
+            return 0
 
-                if log_callback:
-                    log_callback(f"  ✅ [Batch] Indexed {len(code_files)} code + {len(text_files)} text files.")
+        try:
+            dim = int(model.get_sentence_embedding_dimension())
+        except Exception:
+            dim = model_pool.get_model_dimension(DOMAIN_MODEL_KEYS[domain])
+
+        if log_callback:
+            log_callback(
+                f"  🤖 [FAISS] Encoding {len(files)} {domain} files "
+                f"in batches of {batch_size} (dim={dim})..."
+            )
+
+        added = 0
+        for i in range(0, len(files), batch_size):
+            batch = files[i:i + batch_size]
+            texts = [f.get('content', '')[:4000] for f in batch]
+
+            # Heavy work stays OUTSIDE the lock so scans can run concurrently.
+            embeddings = model.encode(texts, convert_to_numpy=True, batch_size=batch_size)
+            embeddings = np.asarray(embeddings, dtype="float32")
+            if embeddings.ndim == 1:
+                embeddings = embeddings.reshape(1, -1)
+
+            # L2-normalize so inner product == cosine similarity.
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            norms[norms == 0.0] = 1.0
+            embeddings = embeddings / norms
+
+            with self._lock:
+                index = self._get_index(domain, dim)
+                ids = np.array([self._next_id() for _ in batch], dtype="int64")
+                index.add_with_ids(np.ascontiguousarray(embeddings), ids)
+
+                for j, file_rec in enumerate(batch):
+                    file_path = file_rec.get('relative_path', file_rec.get('filename', ''))
+                    self._mapping["vectors"][str(int(ids[j]))] = {
+                        "project_id": project_id,
+                        "file_path": file_path,
+                        "domain": domain,
+                    }
+                added += len(batch)
+
+        with self._lock:
+            self._save_mapping()
+            self._persist_index(domain)
+        return added
+
+    # ------------------------------------------------------------------
+    # Deletion
+    # ------------------------------------------------------------------
+    def delete_project(self, project_id: str) -> int:
+        """
+        Remove every vector belonging to ``project_id`` from both FAISS
+        indices (via ``remove_ids``) and from the JSON mapping file.
+        Returns the number of vectors removed.
+        """
+        with self._lock:
+            ids_by_domain: Dict[str, List[int]] = {d: [] for d in DOMAINS}
+            for str_id, meta in list(self._mapping.get("vectors", {}).items()):
+                if meta.get("project_id") == project_id:
+                    domain = meta.get("domain", "text")
+                    ids_by_domain.setdefault(domain, []).append(int(str_id))
+                    del self._mapping["vectors"][str_id]
+
+            removed = 0
+            for domain, ids in ids_by_domain.items():
+                if not ids:
+                    continue
+                index = self._indices.get(domain)
+                if index is not None and index.ntotal > 0:
+                    index.remove_ids(np.array(ids, dtype="int64"))
+                    self._persist_index(domain)
+                removed += len(ids)
+
+            self._save_mapping()
+            return removed
+
+    # ------------------------------------------------------------------
+    # Bulk semantic search
+    # ------------------------------------------------------------------
+    def search_bulk(self, project_id: str, top_k: int = DEFAULT_TOP_K) -> List[Dict[str, Any]]:
+        """
+        For every vector of ``project_id``, query the FAISS index for its
+        top-k most similar vectors (cosine via inner product), filter out
+        matches belonging to the SAME project, and return a clean list of
+        cross-project semantic overlaps.
+        """
+        matches: List[Dict[str, Any]] = []
+
+        with self._lock:
+            vectors = self._mapping.get("vectors", {})
+
+            # Bucket this project's own ids per domain.
+            own_by_domain: Dict[str, List[int]] = {d: [] for d in DOMAINS}
+            for str_id, meta in vectors.items():
+                if meta.get("project_id") == project_id:
+                    own_by_domain.setdefault(meta.get("domain", "text"), []).append(int(str_id))
+
+            for domain in DOMAINS:
+                index = self._indices.get(domain)
+                own_ids = own_by_domain.get(domain, [])
+                if not own_ids or index is None or index.ntotal == 0:
+                    continue
+
+                # Reconstruct this project's stored (already normalized)
+                # embeddings and use them as the query batch. IndexIDMap does
+                # not implement reconstruct(), so resolve int64 labels to
+                # internal offsets via id_map and reconstruct from the
+                # underlying IndexFlatIP.
+                try:
+                    labels = faiss.vector_to_array(index.id_map)
+                except Exception:
+                    continue
+                pos_of_label = {int(lbl): pos for pos, lbl in enumerate(labels)}
+
+                query_ids: List[int] = []
+                query_paths: List[str] = []
+                query_vecs: List[np.ndarray] = []
+                for int_id in own_ids:
+                    pos = pos_of_label.get(int_id)
+                    if pos is None:
+                        continue  # id no longer present in the FAISS index
+                    try:
+                        vec = index.index.reconstruct_n(pos, 1)[0]
+                    except Exception:
+                        continue
+                    query_ids.append(int_id)
+                    query_paths.append(vectors[str(int_id)].get("file_path", ""))
+                    query_vecs.append(np.asarray(vec, dtype="float32"))
+                if not query_vecs:
+                    continue
+
+                queries = np.ascontiguousarray(np.vstack(query_vecs))
+                own_id_set = set(query_ids)
+
+                # Fetch extra hits so we still have top_k results after
+                # dropping same-project matches.
+                k = min(int(index.ntotal), top_k + len(own_id_set))
+                scores, result_ids = index.search(queries, k)
+
+                for row, (score_row, id_row) in enumerate(zip(scores, result_ids)):
+                    collected = 0
+                    for score, hit_id in zip(score_row, id_row):
+                        hit_id = int(hit_id)
+                        if hit_id == -1 or hit_id in own_id_set:
+                            continue  # FAISS padding / same-project match
+                        hit_meta = vectors.get(str(hit_id))
+                        if not hit_meta or hit_meta.get("project_id") == project_id:
+                            continue
+                        matches.append({
+                            "source_file": query_paths[row],
+                            "matched_project_id": hit_meta.get("project_id"),
+                            "matched_file": hit_meta.get("file_path"),
+                            "similarity": round(float(score), 4),
+                            "domain": domain,
+                        })
+                        collected += 1
+                        if collected >= top_k:
+                            break
+
+        matches.sort(key=lambda m: m["similarity"], reverse=True)
+        return matches
+
+
+# Backward-compatible alias for legacy imports (previously the ChromaDB class).
+MultilingualVectorStore = VectorStore
+
+
 

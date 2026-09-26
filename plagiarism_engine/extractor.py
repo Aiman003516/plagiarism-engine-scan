@@ -1,5 +1,6 @@
 import os
 import re
+import warnings
 from pathlib import Path
 from typing import List, Dict, Any, Union, Optional
 import pypdf
@@ -148,6 +149,10 @@ class FileExtractor:
     def categorize_file(cls, filename_or_path: Union[str, Path]) -> str:
         """Categorize file as 'code' or 'text' based on file extension."""
         ext = Path(filename_or_path).suffix.lower()
+        # Word documents are always 'text'. Note: legacy binary '.doc' cannot be parsed
+        # by python-docx (OpenXML only); extract_file() degrades gracefully to "" for it.
+        if ext in ('.doc', '.docx'):
+            return 'text'
         if ext in CODE_EXTENSIONS:
             return 'code'
         elif ext in TEXT_EXTENSIONS:
@@ -163,8 +168,24 @@ class FileExtractor:
 
         if ext == '.pdf':
             content = cls.extract_text_from_pdf(path)
-        elif ext in ('.docx', '.doc'):
-            content = cls.extract_text_from_docx(path)
+        elif ext == '.doc':
+            # Legacy binary .doc (OLE2) is NOT supported by python-docx, which only reads
+            # OpenXML .docx. Skip it with a warning instead of crashing the whole scan.
+            warnings.warn(
+                f"Skipping legacy .doc file '{path.name}': python-docx only supports .docx (OpenXML). "
+                f"Convert it to .docx to include it in the scan.",
+                stacklevel=2,
+            )
+            content = ""
+        elif ext == '.docx':
+            try:
+                content = cls.extract_text_from_docx(path)
+            except Exception as e:
+                warnings.warn(
+                    f"Could not extract text from Word document '{path.name}': {e}",
+                    stacklevel=2,
+                )
+                content = ""
         else:
             content = cls.read_text_file(path)
 

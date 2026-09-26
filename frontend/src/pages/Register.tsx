@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
-import { Shield, Mail, Lock, User, Loader2 } from "lucide-react";
+import { Shield, Mail, Lock, User, Loader2, GraduationCap } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { authApi } from "../lib/api";
@@ -18,18 +18,26 @@ export default function Register() {
   const [form, setForm] = useState({
     name: "",
     email: "",
+    enrollment_number: "",
     password: "",
     role: "college_admin",
     college_id: "",
   });
   const [loading, setLoading] = useState(false);
 
+  // Students authenticate with an enrollment ID; staff/admins with an email.
+  const isStudent = form.role === "student";
+
   const update = (key: string, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name.trim() || !form.email.trim() || !form.password) {
+    const identifier = isStudent
+      ? form.enrollment_number.trim()
+      : form.email.trim();
+
+    if (!form.name.trim() || !identifier || !form.password) {
       toast.error(t("invalid_credentials"));
       return;
     }
@@ -37,7 +45,10 @@ export default function Register() {
     try {
       const res = await authApi.register({
         name: form.name.trim(),
-        email: form.email.trim(),
+        // Send exactly one identity field, matching the selected role.
+        ...(isStudent
+          ? { enrollment_number: identifier }
+          : { email: identifier }),
         password: form.password,
         role: form.role,
         college_id: form.college_id || undefined,
@@ -45,7 +56,14 @@ export default function Register() {
       localStorage.setItem("auth_token", res.token);
       localStorage.setItem("user_data", JSON.stringify(res.user));
       toast.success(t("register_success"));
-      navigate("/dashboard");
+      // New student accounts are provisioned with requires_password_change=true.
+      if (res.user.requires_password_change) {
+        navigate("/force-change-password", {
+          state: { oldPassword: form.password },
+        });
+      } else {
+        navigate("/dashboard");
+      }
     } catch (err: any) {
       toast.error(err?.message || t("invalid_credentials"));
     } finally {
@@ -85,22 +103,43 @@ export default function Register() {
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-text-main mb-1.5">
-              {t("login_email")}
-            </label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-              <input
-                type="email"
-                value={form.email}
-                onChange={(e) => update("email", e.target.value)}
-                className="input-field w-full pl-9"
-                placeholder={t("login_email")}
-                autoComplete="email"
-              />
+          {/* Identity field swaps with the selected role: students use an
+              enrollment ID, staff/admins use an email address. */}
+          {isStudent ? (
+            <div>
+              <label className="block text-sm font-medium text-text-main mb-1.5">
+                {t("enrollment_id")}
+              </label>
+              <div className="relative">
+                <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+                <input
+                  type="text"
+                  value={form.enrollment_number}
+                  onChange={(e) => update("enrollment_number", e.target.value)}
+                  className="input-field w-full pl-9"
+                  placeholder={t("enrollment_id")}
+                  autoComplete="username"
+                />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-text-main mb-1.5">
+                {t("login_email")}
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => update("email", e.target.value)}
+                  className="input-field w-full pl-9"
+                  placeholder={t("login_email")}
+                  autoComplete="email"
+                />
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-text-main mb-1.5">

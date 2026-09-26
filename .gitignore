@@ -77,3 +77,11 @@ full_test_screens/
 # OS Files
 .DS_Store
 Thumbs.db
+
+# --- Frontend source (must stay tracked) -----------------------------------
+# The Python packaging rule `lib/` above also matches frontend/src/lib/, which
+# holds core React modules (api.ts, i18n.tsx, scanStore.ts, utils.ts) that every
+# page imports. Re-include them so a fresh clone can actually build the app.
+!frontend/src/lib/
+!frontend/src/lib/**
+

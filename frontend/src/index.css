@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: `dark:` utilities follow the `.dark` class toggled on <html> */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-background: rgb(var(--bg-background));
   --color-surface: rgb(var(--bg-surface));
+  --color-surface-hover: rgb(var(--bg-surface-hover));
   --color-card: rgb(var(--bg-surface));
   --color-text-main: rgb(var(--text-main));
   --color-text-muted: rgb(var(--text-muted));
@@ -21,17 +25,21 @@
   --color-success: #10b981;
   --color-warning: #f59e0b;
   --color-danger: #ef4444;
+  --color-danger-text: rgb(var(--danger-text));
 }
 
 @layer base {
   :root {
-    /* Light Mode: Clean & Editorial */
-    --bg-background: 250 249 245;
+    /* Light Mode: Clean & Editorial — calibrated to cut glare (off-white base,
+       desaturated green-grey borders, ~13:1 body text contrast without pure black) */
+    color-scheme: light;
+    --bg-background: 244 245 244;
     --bg-surface: 255 255 255;
-    --text-main: 1 62 55;
-    --text-muted: 90 122 117;
-    --border: 235 230 213;
-    --glass-border: 235 230 213;
+    --bg-surface-hover: 235 238 236;
+    --text-main: 26 38 36;
+    --text-muted: 95 115 110;
+    --border: 215 222 219;
+    --glass-border: 215 222 219;
 
     --primary: 1 62 55;
     --primary-hover: 2 92 82;
@@ -40,16 +48,22 @@
     --accent: 255 239 179;
     --accent-hover: 255 228 154;
     --accent-text: 1 62 55;
+
+    /* Readable red for highlighted (copied) diff lines on a light surface */
+    --danger-text: 185 28 28;
   }
 
   .dark {
-    /* Dark Mode: Luxury Command Center */
-    --bg-background: 6 26 23;
-    --bg-surface: 12 43 38;
-    --text-main: 244 243 236;
-    --text-muted: 160 175 169;
-    --border: 26 74 66;
-    --glass-border: 26 74 66;
+    /* Dark Mode: Luxury Command Center — calibrated to reduce halation (lifted
+       charcoal-green base instead of near-black, off-white text instead of pure white) */
+    color-scheme: dark;
+    --bg-background: 19 27 25;
+    --bg-surface: 27 38 35;
+    --bg-surface-hover: 36 51 47;
+    --text-main: 226 232 230;
+    --text-muted: 138 153 149;
+    --border: 45 64 59;
+    --glass-border: 45 64 59;
 
     --primary: 255 239 179;
     --primary-hover: 255 233 147;
@@ -58,13 +72,15 @@
     --accent: 255 239 179;
     --accent-hover: 255 233 147;
     --accent-text: 1 62 55;
+
+    /* Readable red for highlighted (copied) diff lines on a dark surface */
+    --danger-text: 248 113 113;
   }
 
   html, body {
-    @apply h-full w-full m-0 p-0 overflow-hidden;
+    @apply h-full w-full m-0 p-0 overflow-hidden antialiased bg-background text-text-main;
     font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-    background-color: var(--color-background);
-    color: var(--color-text-main);
+    /* Colors scale smoothly between light and dark via theme variables */
     transition: background-color 0.3s ease, color 0.3s ease;
   }
 

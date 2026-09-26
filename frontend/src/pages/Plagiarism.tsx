@@ -12,10 +12,12 @@ import {
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import {
   plagiarismApi,
   PlagiarismHistoryItem,
-  GitRepoScanPayload
+  GitRepoScanPayload,
+  API_BASE_URL
 } from "../lib/api";
 import { useScanStore, UploadedFileInfo } from "../lib/scanStore";
 // Supported file extension categories
@@ -42,7 +44,7 @@ const BINARY_EXTS = new Set([
 ]);
 
 // SSE events can span network chunks, including in the middle of a UTF-8 character.
-async function readZipScanStream(response: Response, onLog: (text: string) => void): Promise<void> {
+async function readZipScanStream(response: Response, onLog: (text: string) => void): Promise<any> {
   if (!response.ok) {
     const detail = (await response.text()).trim();
     throw new Error(`ZIP upload failed (${response.status})${detail ? `: ${detail}` : "."}`);
@@ -59,13 +61,14 @@ async function readZipScanStream(response: Response, onLog: (text: string) => vo
   let buffer = "";
   let dataLines: string[] = [];
   let completed = false;
+  let finalResult: any = null;
 
   const dispatchEvent = () => {
     if (dataLines.length === 0) return;
     const data = dataLines.join("\n");
     dataLines = [];
 
-    let event: { type?: string; text?: string; message?: string } | null;
+    let event: { type?: string; text?: string; message?: string; result?: any } | null;
     try {
       event = JSON.parse(data);
     } catch {
@@ -79,6 +82,7 @@ async function readZipScanStream(response: Response, onLog: (text: string) => vo
       onLog(event.text);
     } else if (event.type === "complete") {
       completed = true;
+      finalResult = event.result;
     } else if (event.type === "error") {
       throw new Error(event.message || "The ZIP scan failed.");
     }
@@ -120,13 +124,16 @@ async function readZipScanStream(response: Response, onLog: (text: string) => vo
     }
     reader.releaseLock();
   }
+  return finalResult;
 }
 
 export function Plagiarism() {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   // Mode Switcher: Direct Intake vs Git Repository
   const [activeTab, setActiveTab] = useState<"direct" | "git">("direct");
@@ -214,7 +221,7 @@ export function Plagiarism() {
     let localInspectedCount = 0;
     
     const startTime = Date.now();
-    const CHUNK_SIZE = 20;
+    const CHUNK_SIZE = 500;
 
     for (let i = 0; i < files.length; i += CHUNK_SIZE) {
       const chunk = files.slice(i, Math.min(i + CHUNK_SIZE, files.length));
@@ -286,7 +293,7 @@ export function Plagiarism() {
         processed: i + chunk.length,
         phase: `Reading file content (${(i + chunk.length).toLocaleString()}/${files.length.toLocaleString()}) — ${elapsed}s elapsed`,
       });
-      await new Promise(r => requestAnimationFrame(r));
+      await new Promise(r => setTimeout(r, 0));
     }
 
     const intakeState = useScanStore.getState();
@@ -435,20 +442,28 @@ export function Plagiarism() {
     }
 
     const archives = uploadedFiles.filter(f => f.type === "archive");
-    if (archives.some(f => !f.name.toLowerCase().endsWith(".zip"))) {
-      toast.error("Only .zip archives are supported. Remove other archive formats before scanning.");
-      return;
-    }
-    if (archives.length > 0 && uploadedFiles.length !== 1) {
-      toast.error("Scan one ZIP archive at a time, without additional staged files.");
-      return;
+    const isZipFlow = uploadedFiles.length === 1 && archives.length === 1;
+
+    if (archives.length > 0 && !isZipFlow) {
+      toast.success(t("nested_archives_ignored", "Nested archives detected and ignored. Scanning source files."), { icon: 'ℹ️' });
+      // We don't return here, we let it proceed as a normal multi-file scan
+    } else if (archives.length > 0 && isZipFlow) {
+      if (!archives[0].name.toLowerCase().endsWith(".zip")) {
+        toast.error(t("only_zip_supported", "Only .zip archives are supported."));
+        return;
+      }
     }
 
-    const zipFile = archives[0];
+    // Only a lone, single .zip takes the archive-upload endpoint; otherwise the
+    // staged source files are scanned and any nested archives are dropped.
+    const zipFile = isZipFlow ? archives[0] : undefined;
     const activeProjectName = projectName.trim() || (uploadedFiles[0].path.includes("/") ? uploadedFiles[0].path.split("/")[0] : "Intake_Project");
     const appendLog = (text: string) => useScanStore.getState().appendLog(text);
-    const onComplete = () => {
+    const onComplete = (result?: any) => {
       appendLog(`[${new Date().toLocaleTimeString()}] [COMPLETED] ✅ Scan completed for ${activeProjectName}.`);
+      if (result) {
+        useScanStore.getState().completeScan(result);
+      }
       toast.success(t("intake_progress_title") + " ✓");
     };
     const onError = (message: string) => {
@@ -464,10 +479,10 @@ export function Plagiarism() {
 
     try {
       // Preserve the existing best-effort duplicate check.
-      const res = await fetch(`/api/plagiarism/projects/check?names=${encodeURIComponent(activeProjectName)}`).catch(() => null);
+      const res = await fetch(`${API_BASE_URL}/api/plagiarism/projects/check?names=${encodeURIComponent(activeProjectName)}`).catch(() => null);
       if (res?.ok) {
         const data = await res.json();
-        if (data.exists || (data.existing_projects && data.existing_projects.length > 0)) {
+        if (Array.isArray(data) && data.length > 0) {
           throw new Error(`Project "${activeProjectName}" already exists in the database. Skipping duplicate.`);
         }
       }
@@ -480,23 +495,36 @@ export function Plagiarism() {
 
         appendLog(`[${new Date().toLocaleTimeString()}] [UPLOAD] Sending ${zipFile.name} (${formatFileSize(zipFile.size)})...`);
         appendLog("[STATUS] Waiting for backend logs. This endpoint may buffer logs until processing finishes.");
-        const response = await fetch("/api/plagiarism/upload-zip-stream", {
+        const token = localStorage.getItem("auth_token");
+        const headers: Record<string, string> = { Accept: "text/event-stream" };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        const response = await fetch(`${API_BASE_URL}/api/plagiarism/upload-zip-stream`, {
           method: "POST",
-          headers: { Accept: "text/event-stream" },
+          headers,
           body: formData,
           signal: controller.signal,
         });
-        await readZipScanStream(response, appendLog);
-        onComplete();
+        const result = await readZipScanStream(response, appendLog);
+        onComplete(result);
       } else {
         appendLog(`[${new Date().toLocaleTimeString()}] [INTAKE] Code files: ${stagedCodeCount}, Documents: ${stagedDocCount}, Total LOC: ${stagedLoc}`);
         const payloadFiles = uploadedFiles
-          .filter(f => f.content && f.type !== "other" && f.type !== "archive")
+          // NOTE: an explicit undefined/null check is required here — `f.content` is ""
+          // for legitimately empty files (e.g. __init__.py), which is falsy in JS and
+          // used to make those files silently disappear from the scan payload.
+          .filter(f => f.content !== undefined && f.content !== null && f.type !== "other" && f.type !== "archive")
           .map(f => ({
             path: f.path,
             content: f.content || "",
             file_type: f.type,
           }));
+
+        if (payloadFiles.length === 0) {
+          throw new Error(
+            t("no_scannable_source_files", "No scannable source files remain after ignoring nested archives.")
+          );
+        }
 
         await plagiarismApi.uploadAndScanStream(
           activeProjectName,
@@ -636,12 +664,22 @@ export function Plagiarism() {
         accept=".zip" 
         className="hidden" 
       />
+      {/* Folder input */}
+      <input 
+        type="file" 
+        ref={folderInputRef} 
+        onChange={handleFileSelect} 
+        // @ts-ignore - webkitdirectory is non-standard but supported
+        webkitdirectory=""
+        directory=""
+        className="hidden" 
+      />
 
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex flex-col gap-1.5">
           <h1 className="text-2xl font-bold text-text-main flex items-center gap-3">
-            <ShieldAlert className="w-7 h-7 text-accent" />
+            <ShieldAlert className="w-7 h-7 text-primary dark:text-accent" />
             {t("plagiarism_title")}
           </h1>
           <p className="text-text-muted text-sm max-w-3xl leading-relaxed">
@@ -652,7 +690,7 @@ export function Plagiarism() {
           {uploadedFiles.length > 0 && activeTab === "direct" && (
             <button 
               onClick={clearUpload} 
-              className="px-3.5 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold flex items-center gap-1.5 border border-red-500/20 transition-colors"
+              className="px-3.5 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 text-xs font-semibold flex items-center gap-1.5 border border-red-500/20 transition-colors"
             >
               <Trash2 className="w-4 h-4" />
               {t("clear_all")}
@@ -662,7 +700,7 @@ export function Plagiarism() {
             onClick={handleOpenHistory}
             className="bg-surface/60 hover:bg-surface border border-glass-border rounded-xl px-4 py-2 flex items-center gap-2 text-sm font-semibold text-text-main transition-colors shrink-0 shadow-sm"
           >
-            <History className="w-4 h-4 text-accent" />
+            <History className="w-4 h-4 text-primary dark:text-accent" />
             {t("scan_history")}
           </button>
         </div>
@@ -674,7 +712,7 @@ export function Plagiarism() {
           onClick={() => setActiveTab("direct")}
           className={`pb-3 px-4 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${
             activeTab === "direct"
-              ? "border-accent text-accent"
+              ? "border-accent text-primary dark:text-accent"
               : "border-transparent text-text-muted hover:text-text-main"
           }`}
         >
@@ -685,7 +723,7 @@ export function Plagiarism() {
           onClick={() => setActiveTab("git")}
           className={`pb-3 px-4 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${
             activeTab === "git"
-              ? "border-accent text-accent"
+              ? "border-accent text-primary dark:text-accent"
               : "border-transparent text-text-muted hover:text-text-main"
           }`}
         >
@@ -721,7 +759,7 @@ export function Plagiarism() {
               {(isProcessingFiles || isTraversing) ? (
                 <div className="flex flex-col items-center w-full max-w-md animate-in fade-in zoom-in duration-300">
                   <div className="w-20 h-20 rounded-3xl bg-surface border border-glass-border flex items-center justify-center mb-4 shadow-2xl">
-                    <RefreshCw className="w-10 h-10 text-accent animate-spin" />
+                    <RefreshCw className="w-10 h-10 text-primary dark:text-accent animate-spin" />
                   </div>
                   <h2 className="text-xl font-bold text-text-main text-center mb-2">
                     {processingPhase || t("processing_files", "Processing files...")}
@@ -733,9 +771,9 @@ export function Plagiarism() {
                         <span>{processedFilesCount} / {totalFilesToProcess}</span>
                         <span>{Math.round((processedFilesCount / totalFilesToProcess) * 100)}%</span>
                       </div>
-                      <div className="h-2 w-full bg-background/50 rounded-full overflow-hidden border border-glass-border/30">
+                      <div className="h-2.5 w-full bg-text-muted/15 dark:bg-slate-800 rounded-full overflow-hidden border border-glass-border dark:border-slate-700">
                         <div 
-                          className="h-full bg-gradient-to-r from-accent to-primary-hover rounded-full shadow-[0_0_10px_rgba(249,115,22,0.5)] transition-all duration-300 ease-out" 
+                          className="h-full bg-gradient-to-r from-accent to-primary-hover rounded-full shadow-[0_0_10px_rgba(255,214,102,0.55)] transition-all duration-300 ease-out" 
                           style={{ width: `${(processedFilesCount / totalFilesToProcess) * 100}%` }}
                         ></div>
                       </div>
@@ -745,7 +783,7 @@ export function Plagiarism() {
               ) : (
                 <>
                   <div className="w-20 h-20 rounded-3xl bg-surface border border-glass-border flex items-center justify-center mb-4 shadow-2xl group">
-                    <UploadCloud className={`w-10 h-10 transition-transform group-hover:scale-110 ${isDragging ? 'text-accent' : 'text-text-muted'}`} />
+                    <UploadCloud className={`w-10 h-10 transition-transform group-hover:scale-110 ${isDragging ? 'text-primary dark:text-accent' : 'text-text-muted'}`} />
                   </div>
                   
                   <h2 className="text-xl font-bold text-text-main text-center">
@@ -754,6 +792,16 @@ export function Plagiarism() {
                   <p className="text-xs text-text-muted mt-2 mb-6 text-center max-w-xl leading-relaxed">
                     {t("unified_upload_sub")}
                   </p>
+
+                  <div className="w-full max-w-sm mb-4">
+                    <input 
+                      type="text" 
+                      placeholder="Project Name (e.g., Spring2026_Final)" 
+                      className="w-full bg-surface border border-glass-border rounded-xl px-4 py-2.5 text-sm text-text-main focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all placeholder:text-text-muted/50"
+                      value={projectName}
+                      onChange={(e) => useScanStore.getState().setProjectName(e.target.value)}
+                    />
+                  </div>
 
                   {/* Quick Action Buttons inside the dropzone */}
                   <div 
@@ -767,6 +815,15 @@ export function Plagiarism() {
                     >
                       <FilePlus className="w-4 h-4 text-primary" />
                       {t("browse_files")}
+                    </button>
+
+                    <button 
+                      onClick={() => folderInputRef.current?.click()}
+                      disabled={isProcessingFiles}
+                      className="bg-surface hover:bg-surface-hover border border-glass-border text-text-main font-semibold px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs transition-all shadow-sm active:scale-95"
+                    >
+                      <FilePlus className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+                      {t("browse_folders")}
                     </button>
 
                     <button 
@@ -788,7 +845,7 @@ export function Plagiarism() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-2.5">
                     <span className="text-xs font-semibold text-text-muted flex items-center gap-1.5">
-                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <ShieldCheck className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
                       {t("intake_progress_title")}:
                     </span>
 
@@ -798,7 +855,7 @@ export function Plagiarism() {
                       </span>
                     )}
 
-                    <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
+                    <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
                       ⚡ {uploadedFiles.length} {t("intake_core_staged")}
                     </span>
 
@@ -811,7 +868,7 @@ export function Plagiarism() {
                     onClick={() => setShowExplorer(!showExplorer)}
                     className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-surface border border-glass-border hover:bg-surface-hover text-text-main text-xs font-medium transition-colors"
                   >
-                    <HardDrive className="w-3.5 h-3.5 text-accent" />
+                    <HardDrive className="w-3.5 h-3.5 text-primary dark:text-accent" />
                     {t("staged_files_header")} ({uploadedFiles.length})
                     {showExplorer ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                   </button>
@@ -823,7 +880,7 @@ export function Plagiarism() {
                     <FileCode2 className="w-3.5 h-3.5" />
                     {stagedCodeCount} {t("code_files")}
                   </div>
-                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs">
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs">
                     <FileText className="w-3.5 h-3.5" />
                     {stagedDocCount} {t("doc_files")}
                   </div>
@@ -833,7 +890,7 @@ export function Plagiarism() {
                       {stagedArchiveCount} {t("archive_files")}
                     </div>
                   )}
-                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs">
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs">
                     <TerminalSquare className="w-3.5 h-3.5" />
                     {stagedLoc.toLocaleString()} {t("loc_staged_metric")}
                   </div>
@@ -854,26 +911,26 @@ export function Plagiarism() {
                     <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
                       <button 
                         onClick={() => setStagedCategory("all")}
-                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${stagedCategory === "all" ? "bg-accent text-white" : "bg-surface text-text-muted hover:text-text-main"}`}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${stagedCategory === "all" ? "bg-accent text-accent-text" : "bg-surface text-text-muted hover:text-text-main"}`}
                       >
                         {t("all_files")} ({uploadedFiles.length})
                       </button>
                       <button 
                         onClick={() => setStagedCategory("code")}
-                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${stagedCategory === "code" ? "bg-primary text-white" : "bg-surface text-text-muted hover:text-text-main"}`}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${stagedCategory === "code" ? "bg-primary text-primary-text" : "bg-surface text-text-muted hover:text-text-main"}`}
                       >
                         {t("code_files")} ({stagedCodeCount})
                       </button>
                       <button 
                         onClick={() => setStagedCategory("text")}
-                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${stagedCategory === "text" ? "bg-amber-500 text-white" : "bg-surface text-text-muted hover:text-text-main"}`}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${stagedCategory === "text" ? "bg-amber-600 text-white" : "bg-surface text-text-muted hover:text-text-main"}`}
                       >
                         {t("doc_files")} ({stagedDocCount})
                       </button>
                       {stagedArchiveCount > 0 && (
                         <button 
                           onClick={() => setStagedCategory("archive")}
-                          className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${stagedCategory === "archive" ? "bg-accent text-white" : "bg-surface text-text-muted hover:text-text-main"}`}
+                          className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${stagedCategory === "archive" ? "bg-accent text-accent-text" : "bg-surface text-text-muted hover:text-text-main"}`}
                         >
                           {t("archive_files")} ({stagedArchiveCount})
                         </button>
@@ -907,7 +964,7 @@ export function Plagiarism() {
                           <span className="text-[11px] text-text-muted font-mono">{formatFileSize(file.size)}</span>
                           <button 
                             onClick={() => removeStagedFile(file.id)}
-                            className="text-text-muted hover:text-red-400 p-1 rounded transition-colors"
+                            className="text-text-muted hover:text-red-500 dark:hover:text-red-400 p-1 rounded transition-colors"
                             title={t("remove_file")}
                           >
                             <X className="w-3.5 h-3.5" />
@@ -929,7 +986,7 @@ export function Plagiarism() {
           {/* PRIMARY CTA BAR FOR DIRECT INTAKE */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 glass-card !p-5">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-accent/15 rounded-xl border border-accent/30 text-accent">
+              <div className="p-3 bg-accent/15 rounded-xl border border-accent/30 text-primary dark:text-accent">
                 <Cpu className="w-6 h-6" />
               </div>
               <div>
@@ -938,23 +995,35 @@ export function Plagiarism() {
               </div>
             </div>
 
-            <button 
-              onClick={startDirectScan}
-              disabled={isScanning || isProcessingFiles || isTraversing || uploadedFiles.length === 0}
-              className="w-full sm:w-auto bg-gradient-to-r from-primary to-primary-hover hover:from-primary-hover hover:to-primary text-white font-bold text-base rounded-xl px-8 py-3.5 shadow-[0_0_25px_rgba(239,68,68,0.25)] hover:shadow-[0_0_35px_rgba(239,68,68,0.4)] transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
-            >
-              {isScanning ? (
-                <>
-                  <RefreshCw className="w-5 h-5 animate-spin" />
-                  {t("processing_files")}
-                </>
-              ) : (
-                <>
-                  <Search className="w-5 h-5" />
-                  {t("upload_index_project")}
-                </>
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+              {!isScanning && uploadedFiles.length > 0 && (
+                <button
+                  onClick={clearUpload}
+                  className="w-full sm:w-auto px-6 py-3 rounded-lg font-medium text-danger border border-danger/30 hover:bg-danger/10 transition-colors flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  {t("clear_uploads", "Clear Uploads")}
+                </button>
               )}
-            </button>
+
+              <button 
+                onClick={startDirectScan}
+                disabled={isScanning || isProcessingFiles || isTraversing || uploadedFiles.length === 0}
+                className="w-full sm:w-auto bg-gradient-to-r from-primary to-primary-hover hover:from-primary-hover hover:to-primary text-primary-text font-bold text-base rounded-xl px-8 py-3.5 shadow-[0_0_25px_rgba(239,68,68,0.25)] hover:shadow-[0_0_35px_rgba(239,68,68,0.4)] transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+              >
+                {isScanning ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    {t("processing_files")}
+                  </>
+                ) : (
+                  <>
+                    <Search className="w-5 h-5" />
+                    {t("upload_index_project")}
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </motion.div>
       )}
@@ -981,8 +1050,8 @@ export function Plagiarism() {
               {/* Repo URL */}
               <div className="space-y-1.5 md:col-span-2">
                 <label className="text-xs font-semibold text-text-main flex items-center gap-1.5">
-                  <Globe className="w-3.5 h-3.5 text-accent" />
-                  {t("git_repo_url")} <span className="text-red-400">*</span>
+                  <Globe className="w-3.5 h-3.5 text-primary dark:text-accent" />
+                  {t("git_repo_url")} <span className="text-red-500 dark:text-red-400">*</span>
                 </label>
                 <input 
                   type="text"
@@ -1011,7 +1080,7 @@ export function Plagiarism() {
               {/* Project / Thesis Name */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-text-main flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-amber-400" />
+                  <FileText className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
                   {t("git_project_name")}
                 </label>
                 <input 
@@ -1026,7 +1095,7 @@ export function Plagiarism() {
               {/* Access Token (Optional) */}
               <div className="space-y-1.5 md:col-span-2">
                 <label className="text-xs font-semibold text-text-muted flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400" />
                   {t("git_token_label")}
                 </label>
                 <input 
@@ -1042,10 +1111,10 @@ export function Plagiarism() {
             {/* Ingestion Specs Note */}
             <div className="p-4 rounded-xl bg-surface/30 border border-glass-border flex items-center justify-between text-xs text-text-muted">
               <span className="flex items-center gap-2">
-                <Info className="w-4 h-4 text-accent shrink-0" />
+                <Info className="w-4 h-4 text-primary dark:text-accent shrink-0" />
                 <span>Shallow Clone depth=1 • Automated .gitignore bloat exclusion • Ephemeral secure sandbox</span>
               </span>
-              <span className="font-semibold text-emerald-400">Security Gate: Active</span>
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">Security Gate: Active</span>
             </div>
           </div>
 
@@ -1064,7 +1133,7 @@ export function Plagiarism() {
             <button 
               onClick={startGitScan}
               disabled={isScanning || !gitRepoUrl.trim()}
-              className="w-full sm:w-auto bg-gradient-to-r from-primary to-primary-hover hover:from-primary-hover hover:to-primary-hover text-white font-bold text-base rounded-xl px-8 py-3.5 shadow-[0_0_25px_rgba(59,130,246,0.25)] hover:shadow-[0_0_35px_rgba(59,130,246,0.4)] transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+              className="w-full sm:w-auto bg-gradient-to-r from-primary to-primary-hover hover:from-primary-hover hover:to-primary-hover text-primary-text font-bold text-base rounded-xl px-8 py-3.5 shadow-[0_0_25px_rgba(59,130,246,0.25)] hover:shadow-[0_0_35px_rgba(59,130,246,0.4)] transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
             >
               {isScanning ? (
                 <>
@@ -1087,16 +1156,16 @@ export function Plagiarism() {
         <motion.div 
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-surface/80 rounded-xl overflow-hidden"
+          className="bg-surface/80 border border-glass-border dark:border-slate-700 rounded-xl overflow-hidden"
         >
           <div className="p-3.5 px-5 bg-surface/80 border-b border-glass-border flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <span className="text-xs font-mono font-bold text-text-muted flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-accent" />
+                <Terminal className="w-4 h-4 text-primary dark:text-accent" />
                 {t("live_terminal_title")}
               </span>
               {isScanning && (
-                <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-bold text-emerald-400 animate-pulse">
+                <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 animate-pulse">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                   {t("live_stream_active")}
                 </span>
@@ -1107,7 +1176,7 @@ export function Plagiarism() {
               {isScanning && (
                 <button 
                   onClick={cancelScan}
-                  className="px-2.5 py-1 rounded-lg text-[11px] font-mono bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition-colors"
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-mono bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/20 transition-colors"
                   title="Cancel Scan"
                 >
                   Cancel Scan
@@ -1115,7 +1184,7 @@ export function Plagiarism() {
               )}
               <button 
                 onClick={() => setTerminalAutoScroll(!terminalAutoScroll)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-mono transition-colors ${terminalAutoScroll ? 'bg-accent/20 text-accent border border-accent/30' : 'bg-surface text-text-muted'}`}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-mono transition-colors ${terminalAutoScroll ? 'bg-accent/20 text-primary dark:text-accent border border-accent/30' : 'bg-surface text-text-muted'}`}
               >
                 Auto-Scroll: {terminalAutoScroll ? "ON" : "OFF"}
               </button>
@@ -1150,9 +1219,9 @@ export function Plagiarism() {
                   key={idx} 
                   className={`flex items-start gap-2 ${
                     isError 
-                      ? 'text-red-400' 
+                      ? 'text-red-600 dark:text-red-400' 
                       : isCompleted 
-                      ? 'text-emerald-400 font-bold' 
+                      ? 'text-emerald-600 dark:text-emerald-400 font-bold' 
                       : isAst 
                       ? 'text-warning' 
                       : isNlp 
@@ -1172,7 +1241,7 @@ export function Plagiarism() {
             {isScanning && timeSinceLastLog > 2000 && (
               <div className="flex items-start gap-2">
                 <span className="text-text-muted select-none">&gt;</span>
-                <span className="text-accent font-mono">Waiting for the next backend update… {Math.floor(timeSinceLastLog / 1000)}s since the last message.</span>
+                <span className="text-primary dark:text-accent font-mono">Waiting for the next backend update… {Math.floor(timeSinceLastLog / 1000)}s since the last message.</span>
               </div>
             )}
             <div ref={terminalEndRef} />
@@ -1200,7 +1269,7 @@ export function Plagiarism() {
               <div className="p-6 border-b border-glass-border flex justify-between items-center bg-surface/40">
                 <div>
                   <h3 className="text-lg font-bold text-text-main flex items-center gap-2">
-                    <History className="w-5 h-5 text-accent" />
+                    <History className="w-5 h-5 text-primary dark:text-accent" />
                     {t("history_modal_title")}
                   </h3>
                   <p className="text-xs text-text-muted mt-0.5">
@@ -1240,7 +1309,7 @@ export function Plagiarism() {
               <div className="p-6 overflow-y-auto divide-y divide-glass-border/50">
                 {isLoadingHistory && (
                   <div className="py-8 text-center text-xs text-text-muted">
-                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-accent" />
+                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-primary dark:text-accent" />
                     Loading database audit records...
                   </div>
                 )}
@@ -1261,20 +1330,20 @@ export function Plagiarism() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
-                      <span className={`text-sm font-bold ${h.overall_similarity >= 65 ? 'text-red-400' : h.overall_similarity >= 25 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                      <span className={`text-sm font-bold ${h.overall_similarity >= 65 ? 'text-red-600 dark:text-red-400' : h.overall_similarity >= 25 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
                         {h.overall_similarity}%
                       </span>
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
-                        h.verdict === 'SAFE' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'
+                        h.verdict === 'SAFE' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' : 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20'
                       }`}>
                         {h.verdict}
                       </span>
                       <button
                         onClick={() => {
                           setIsHistoryOpen(false);
-                          toast.success(`${t("inspect_report")}: ${h.project_name || h.id}`);
+                          navigate(`/scan?project=${encodeURIComponent(h.project_name || h.id)}`);
                         }}
-                        className="px-2.5 py-1.5 rounded-lg bg-accent text-white font-medium text-xs flex items-center gap-1 shadow-sm transition-all hover:scale-105"
+                        className="px-2.5 py-1.5 rounded-lg bg-accent text-accent-text font-medium text-xs flex items-center gap-1 shadow-sm transition-all hover:scale-105"
                         title={t("inspect_report")}
                       >
                         <Eye className="w-3.5 h-3.5" />
@@ -1282,7 +1351,7 @@ export function Plagiarism() {
                       </button>
                       <button 
                         onClick={() => handleDeleteHistoryReport(h.id)}
-                        className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-xs transition-colors"
+                        className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/20 text-xs transition-colors"
                         title={t("delete_record")}
                       >
                         <Trash2 className="w-3.5 h-3.5" />

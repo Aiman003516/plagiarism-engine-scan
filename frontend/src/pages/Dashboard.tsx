@@ -11,6 +11,10 @@ import {
 import { useTranslation } from "react-i18next";
 import { dashboardApi, DashboardStats } from "../lib/api";
 
+// Stale-While-Revalidate cache: keeps the last known stats across mounts so
+// returning to the Dashboard renders instantly instead of showing a spinner.
+let cachedStats: DashboardStats | null = null;
+
 function StatCard({
   icon: Icon,
   label,
@@ -43,15 +47,17 @@ function StatCard({
 
 export default function Dashboard() {
   const { t } = useTranslation();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<DashboardStats | null>(cachedStats);
+  const [loading, setLoading] = useState(!cachedStats); // Only load if no cache
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
-    setLoading(true);
+    if (!cachedStats) setLoading(true); // Don't show loading spinner if we have cache
     setError(null);
     try {
-      setStats(await dashboardApi.stats());
+      const data = await dashboardApi.stats();
+      cachedStats = data;
+      setStats(data);
     } catch (e: any) {
       setError(e?.message || "Failed to load stats");
     } finally {
@@ -63,15 +69,7 @@ export default function Dashboard() {
     load();
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[50vh] text-text-muted">
-        <RefreshCw className="w-6 h-6 animate-spin text-accent" />
-      </div>
-    );
-  }
-
-  if (error) {
+  if (error && !stats) {
     return (
       <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4">
         <AlertTriangle className="w-8 h-8 text-danger" />
@@ -103,9 +101,20 @@ export default function Dashboard() {
       </header>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-        {statsCards.map((c) => (
-          <StatCard key={c.label} {...c} />
-        ))}
+        {loading && !stats ? (
+          [1, 2, 3, 4, 5].map((i) => (
+            <div
+              key={i}
+              className="animate-pulse glass-card h-32 rounded-xl bg-surface/40 border border-border"
+            />
+          ))
+        ) : (
+          <>
+            {statsCards.map((c) => (
+              <StatCard key={c.label} {...c} />
+            ))}
+          </>
+        )}
       </div>
 
       <section className="glass-panel mt-6 p-5">

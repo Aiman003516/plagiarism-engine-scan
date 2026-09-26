@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  CheckCircle2,
   FolderOpen,
   RefreshCw,
   Search,
@@ -22,7 +23,21 @@ export default function Projects() {
   } | null>(null);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [page, setPage] = useState(1);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
   const PAGE_SIZE = 20;
+
+  // Cached login profile (written by Login.tsx as "user_data"). Drives both the
+  // student visibility filter and the faculty "Approve" action below.
+  const user = useMemo<{ id?: string; role?: string } | null>(() => {
+    const userStr = localStorage.getItem("user_data") || localStorage.getItem("user");
+    if (!userStr) return null;
+    try {
+      return JSON.parse(userStr);
+    } catch {
+      return null;
+    }
+  }, []);
+  const isStudent = user?.role === "student";
 
   const load = async () => {
     setLoading(true);
@@ -63,13 +78,30 @@ export default function Projects() {
     }
   };
 
-  const filtered = projects.filter(
-    (p) =>
+  const approveProject = async (project: ProjectSummary) => {
+    setApprovingId(project.id);
+    try {
+      await plagiarismApi.approveProject(project.id);
+      toast.success(t("approve_success"));
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || t("approve_failed"));
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const filtered = projects.filter((p) => {
+    // Students only ever see their own submissions; staff/admins see everything.
+    if (isStudent && p.student_id !== user?.id) return false;
+
+    return (
       !search.trim() ||
       ((p.name || "").toLowerCase().includes(search.toLowerCase()) ||
         (p.title || "").toLowerCase().includes(search.toLowerCase()) ||
         (p.university || "").toLowerCase().includes(search.toLowerCase()))
-  );
+    );
+  });
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -132,12 +164,33 @@ export default function Projects() {
                     <td className="py-3 px-4 text-text-muted">{p.department || "—"}</td>
                     <td className="py-3 px-4 text-text-muted">{p.year ?? "—"}</td>
                     <td className="py-3 px-4">
-                      <span className="px-2 py-0.5 rounded text-xs font-medium bg-accent text-accent-text">
-                        {p.status || "Indexed"}
+                      <span
+                        className={
+                          p.status === "pending"
+                            ? "bg-warning/20 text-warning px-2 py-1 rounded text-xs"
+                            : "bg-success/20 text-success px-2 py-1 rounded text-xs"
+                        }
+                      >
+                        {p.status?.toUpperCase() || "APPROVED"}
                       </span>
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center justify-end gap-2">
+                        {p.status === "pending" && !isStudent && (
+                          <button
+                            onClick={() => approveProject(p)}
+                            disabled={approvingId === p.id}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-success/20 text-success hover:bg-success/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={t("approve")}
+                          >
+                            {approvingId === p.id ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            )}
+                            {t("approve")}
+                          </button>
+                        )}
                         <button
                           onClick={() => viewFiles(p)}
                           className="p-1.5 rounded-lg text-text-muted hover:bg-text-muted/10 hover:text-text-main transition-colors"
