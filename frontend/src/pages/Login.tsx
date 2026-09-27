@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import { Shield, Mail, Lock, Loader2 } from "lucide-react";
 import { toast } from "react-hot-toast";
@@ -43,7 +43,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center">
+    <div className="min-h-screen w-full flex items-center justify-center bg-background p-4">
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -100,13 +100,6 @@ export default function Login() {
             )}
           </button>
         </form>
-
-        <p className="text-sm text-text-muted text-center mt-6">
-          {t("no_account")}{" "}
-          <Link to="/register" className="text-primary font-medium hover:underline">
-            {t("sign_up")}
-          </Link>
-        </p>
       </motion.div>
     </div>
   );

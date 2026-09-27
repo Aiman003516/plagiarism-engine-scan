@@ -36,7 +36,6 @@ const Teams = React.lazy(() => import("./pages/Teams"));
 const UsersPage = React.lazy(() => import("./pages/Users"));
 const SettingsPage = React.lazy(() => import("./pages/Settings"));
 const LoginPage = React.lazy(() => import("./pages/Login"));
-const RegisterPage = React.lazy(() => import("./pages/Register"));
 const NotFoundPage = React.lazy(() => import("./pages/NotFound"));
 const ForceChangePasswordPage = React.lazy(
   () => import("./pages/ForceChangePassword")
@@ -63,7 +62,7 @@ function LoadingSpinner() {
 /**
  * AppLayout — authenticated shell: sidebar + scrollable content region.
  * Mounted as a pathless layout route *inside* ProtectedRoute so the sidebar
- * never renders on public pages (/login, /register, 404).
+ * never renders on public pages (/login, 404).
  */
 function AppLayout() {
   return (
@@ -98,7 +97,7 @@ export default function App() {
           },
         }}
       />
-      {/* Outer boundary: /login, /register and the 404 page are lazy too and
+      {/* Outer boundary: /login and the 404 page are lazy too and
           render outside AppLayout's Suspense, so they need their own fallback. */}
       <ErrorBoundary>
         <Suspense fallback={<LoadingSpinner />}>
@@ -121,7 +120,6 @@ export default function App() {
             </Route>
             {/* Public routes — no sidebar chrome */}
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </Suspense>

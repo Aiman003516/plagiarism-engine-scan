@@ -120,20 +120,6 @@ export const authApi = {
       body: JSON.stringify({ email: identifier, password }),
     }),
 
-  /** Students register with `enrollment_number`; staff/admins with `email`. */
-  register: (data: {
-    name: string;
-    email?: string;
-    enrollment_number?: string;
-    password: string;
-    role: string;
-    college_id?: string;
-  }) =>
-    apiFetch<AuthResponse>("/api/auth/register", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-
   me: () => apiFetch<AuthUser>("/api/auth/me"),
 
   changePassword: (oldPassword: string, newPassword: string) =>

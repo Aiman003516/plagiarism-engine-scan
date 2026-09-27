@@ -222,7 +222,11 @@ def _run_intake(
 ) -> Dict[str, Any]:
     """Execute code + text intake (extraction, Winnowing, and DB indexing)."""
     db = get_db()
-    vstore = get_vstore()
+    # PERF: the FAISS vector store is no longer touched during intake.
+    # Deep semantic indexing (CodeBERT / BGE-M3 embeddings) is deferred to
+    # Deep Scan mode, so the singleton is not even instantiated here.
+    # Re-enable together with the `index_project_files()` block below.
+    # vstore = get_vstore()
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%S")
 
     from plagiarism_engine.winnowing import WinnowingEngine
@@ -251,14 +255,29 @@ def _run_intake(
     log("[PHASE 2/3] 💾 Indexing project files into database (with Zlib compression)...")
     db.save_project(project_id=project_name, project_name=project_name, files=project_files)
 
-    try:
-        vstore.index_project_files(
-            project_files=project_files,
-            project_id=project_name,
-            log_callback=log,
-        )
-    except Exception as e:
-        log(f"   ⚠️ Vector indexing warning: {e}")
+    # ------------------------------------------------------------------
+    # PERF: Deep Semantic Indexing DECOUPLED from the upload stream.
+    #
+    # `VectorStore.index_project_files()` encoded every file with CodeBERT
+    # (code) / BGE-M3 (text) and pushed the vectors into FAISS
+    # (`add_with_ids` + `faiss.write_index`). That dominated upload latency
+    # (minutes on large projects) while providing no value to the immediate
+    # Winnowing result, so it is now DEFERRED to Deep Scan mode.
+    #
+    # The vector store itself is untouched and stays available for the
+    # deferred Deep Scan indexer — to restore eager indexing, uncomment the
+    # `vstore = get_vstore()` line at the top of this function plus the
+    # block below.
+    # ------------------------------------------------------------------
+    log("[PHASE 2/3] Skipping Deep Semantic Indexing (Deferred to Deep Scan mode)...")
+    # try:
+    #     vstore.index_project_files(
+    #         project_files=project_files,
+    #         project_id=project_name,
+    #         log_callback=log,
+    #     )
+    # except Exception as e:
+    #     log(f"   ⚠️ Vector indexing warning: {e}")
 
     log("[PHASE 3/3] 🔮 Computing Winnowing fingerprints...")
     t0 = time.time()
@@ -589,20 +608,6 @@ def _create_access_token(user_id: str, email: str, role: str, requires_password_
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-class RegisterRequest(BaseModel):
-    """
-    Dual-identity registration:
-      * students sign up with `enrollment_number` -> students table
-      * staff / admins sign up with `email`       -> users table
-    `email` is therefore optional; which identifier is required depends on role.
-    """
-    name: str
-    email: Optional[str] = None
-    enrollment_number: Optional[str] = None
-    password: str
-    role: str = "college_admin"
-
-
 class LoginRequest(BaseModel):
     """
     Login now accepts a generic `identifier`: an email for staff/admin accounts
@@ -657,78 +662,6 @@ def require_role(*allowed_roles: str):
         }
 
     return _enforce
-
-
-@app.post("/api/auth/register")
-async def register(payload: RegisterRequest):
-    """
-    Dual-identity signup:
-      * role == "student" -> students table, keyed by enrollment_number
-      * any other role    -> users table, keyed by email
-
-    Student accounts are created with requires_password_change = TRUE, so the
-    first login (or the signup response) routes them through
-    /force-change-password before they can use the app.
-    """
-    db = get_db()
-    name = payload.name.strip()
-
-    if not name:
-        raise HTTPException(status_code=400, detail="Name is required")
-    if not payload.password:
-        raise HTTPException(status_code=400, detail="Password is required")
-
-    valid_roles = {"ministry_admin", "college_admin", "student"}
-    if payload.role not in valid_roles:
-        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(sorted(valid_roles))}")
-
-    password_hash = bcrypt.hashpw(payload.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    account_id = str(uuid.uuid4())
-
-    # --- Student accounts: enrollment_number is their login identity ---
-    if payload.role == "student":
-        enrollment_number = (payload.enrollment_number or "").strip()
-        if not enrollment_number:
-            raise HTTPException(status_code=400, detail="Enrollment number is required for student accounts")
-        if db.get_student_by_enrollment_number(enrollment_number):
-            raise HTTPException(status_code=400, detail="Enrollment number already registered")
-
-        db.create_student(account_id, enrollment_number, name, password_hash, requires_password_change=True)
-
-        token = _create_access_token(account_id, enrollment_number, "student", True)
-        return {
-            "token": token,
-            "user": {
-                "id": account_id,
-                "name": name,
-                # Students have no email; the enrollment number is their identity.
-                "email": enrollment_number,
-                "enrollment_number": enrollment_number,
-                "role": "student",
-                "requires_password_change": True,
-            },
-        }
-
-    # --- Staff / admin accounts: email is their login identity ---
-    email = (payload.email or "").strip().lower()
-    if not email:
-        raise HTTPException(status_code=400, detail="Email is required for admin and faculty accounts")
-    if db.get_user_by_email(email):
-        raise HTTPException(status_code=400, detail="Email already registered")
-
-    db.create_user(account_id, name, email, password_hash, payload.role, None)
-
-    token = _create_access_token(account_id, email, payload.role)
-    return {
-        "token": token,
-        "user": {
-            "id": account_id,
-            "name": name,
-            "email": email,
-            "role": payload.role,
-            "requires_password_change": False,
-        },
-    }
 
 
 @app.post("/api/auth/login")

@@ -305,7 +305,7 @@ export function PlagiarismAnalysis() {
                         </td>
                         <td className="p-3 font-bold text-text-main">{m.similarity}%</td>
                         <td className="p-3">
-                          <span className={`px-2 py-1 rounded text-xs font-bold ${m.similarity >= 65 ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'}`}>
+                          <span className={`px-2 py-1 rounded text-xs font-bold ${m.similarity >= 65 ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-amber-500/10 text-yellow-700 dark:text-amber-400'}`}>
                             {m.similarity >= 65 ? 'HIGH' : 'MODERATE'}
                           </span>
                         </td>
@@ -428,7 +428,7 @@ export function PlagiarismAnalysis() {
                         </td>
                         <td className="p-3 font-bold">{cmp.similarity}</td>
                         <td className="p-3">
-                          <span className={`px-2 py-1 rounded text-xs font-bold ${cmp.status === 'FLAGGED' ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'}`}>
+                          <span className={`px-2 py-1 rounded text-xs font-bold ${cmp.status === 'FLAGGED' ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-amber-500/10 text-yellow-700 dark:text-amber-400'}`}>
                             {cmp.status}
                           </span>
                         </td>

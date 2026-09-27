@@ -167,7 +167,7 @@ export default function Projects() {
                       <span
                         className={
                           p.status === "pending"
-                            ? "bg-warning/20 text-warning px-2 py-1 rounded text-xs"
+                            ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-500/15 dark:text-yellow-400 px-2 py-1 rounded text-xs font-semibold"
                             : "bg-success/20 text-success px-2 py-1 rounded text-xs"
                         }
                       >
