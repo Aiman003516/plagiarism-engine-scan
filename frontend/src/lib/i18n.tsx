@@ -364,6 +364,8 @@ const translations = {
     "total_users": "Total Users",
     "total_files": "Total Files",
     "flagged_count": "Flagged Scans",
+    "safe_projects": "Safe Projects",
+    "of_total": "of total",
     "recent_scans": "Recent Scans",
     "no_recent_scans": "No scan activity yet.",
 
@@ -781,6 +783,8 @@ const translations = {
     "total_users": "إجمالي المستخدمين",
     "total_files": "إجمالي الملفات",
     "flagged_count": "فحوصات مُعلّمة",
+    "safe_projects": "مشاريع آمنة",
+    "of_total": "من الإجمالي",
     "recent_scans": "أحدث الفحوصات",
     "no_recent_scans": "لا يوجد نشاط فحص بعد.",
 

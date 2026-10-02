@@ -133,12 +133,14 @@ export default function Users() {
           <RefreshCw className="w-6 h-6 animate-spin text-accent" />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="glass-panel p-10 text-center text-text-muted">
-          <UserCog className="w-8 h-8 mx-auto mb-3 opacity-50" />
+        <div className="glass-panel p-10 text-center text-text-muted rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+          <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-500/10 text-purple-500">
+            <UserCog className="w-6 h-6" />
+          </span>
           {t("no_users_found")}
         </div>
       ) : (
-        <div className="glass-panel overflow-hidden">
+        <div className="glass-panel overflow-hidden rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur">
@@ -156,7 +158,7 @@ export default function Users() {
                     <td className="py-3 px-4 font-medium text-text-main">{u.name}</td>
                     <td className="py-3 px-4 text-text-muted">{u.email}</td>
                     <td className="py-3 px-4">
-                      <span className="px-2 py-0.5 rounded text-xs font-medium bg-accent text-accent-text">
+                      <span className="inline-flex items-center rounded-md bg-purple-500/10 px-2 py-0.5 text-xs font-semibold text-purple-500 ring-1 ring-purple-500/20">
                         {u.role}
                       </span>
                     </td>
@@ -165,7 +167,7 @@ export default function Users() {
                       <div className="flex items-center justify-end">
                         <button
                           onClick={() => deleteUser(u)}
-                          className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors"
+                          className="btn-danger-icon"
                           title={t("delete")}
                         >
                           <Trash2 className="w-4 h-4" />

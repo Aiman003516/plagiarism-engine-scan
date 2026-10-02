@@ -17,7 +17,9 @@ import {
   plagiarismApi,
   PlagiarismHistoryItem,
   GitRepoScanPayload,
-  API_BASE_URL
+  API_BASE_URL,
+  ScanStreamSession,
+  scanStreamReconnectUrl
 } from "../lib/api";
 import { useScanStore, UploadedFileInfo } from "../lib/scanStore";
 // Supported file extension categories
@@ -44,7 +46,11 @@ const BINARY_EXTS = new Set([
 ]);
 
 // SSE events can span network chunks, including in the middle of a UTF-8 character.
-async function readZipScanStream(response: Response, onLog: (text: string) => void): Promise<any> {
+async function readZipScanStream(
+  response: Response,
+  onLog: (text: string) => void,
+  onSession?: (session: ScanStreamSession) => void
+): Promise<any> {
   if (!response.ok) {
     const detail = (await response.text()).trim();
     throw new Error(`ZIP upload failed (${response.status})${detail ? `: ${detail}` : "."}`);
@@ -68,7 +74,7 @@ async function readZipScanStream(response: Response, onLog: (text: string) => vo
     const data = dataLines.join("\n");
     dataLines = [];
 
-    let event: { type?: string; text?: string; message?: string; result?: any } | null;
+    let event: { type?: string; text?: string; message?: string; result?: any; project_id?: string; stream_token?: string } | null;
     try {
       event = JSON.parse(data);
     } catch {
@@ -78,7 +84,10 @@ async function readZipScanStream(response: Response, onLog: (text: string) => vo
       throw new Error("Received an invalid event from the ZIP scan stream.");
     }
 
-    if (event.type === "log" && typeof event.text === "string") {
+    if (event.type === "session" && event.project_id && event.stream_token) {
+      // Reconnect capability: lets the UI re-attach after navigation/reload.
+      onSession?.({ project_id: event.project_id, stream_token: event.stream_token });
+    } else if (event.type === "log" && typeof event.text === "string") {
       onLog(event.text);
     } else if (event.type === "complete") {
       completed = true;
@@ -197,6 +206,95 @@ export function Plagiarism() {
     }
     return () => clearInterval(interval);
   }, [isScanning, lastLogTimestamp]);
+
+  // --- Resume an in-flight scan after navigating away or reloading -------------
+  // The scan keeps running server-side and publishes into a buffered session, so
+  // re-attaching replays everything we missed and then follows the live stream.
+  //
+  // `abortController` is never persisted, so its presence proves *this* page session
+  // already owns a live reader for the scan — opening a second connection then would
+  // duplicate every log line. After a reload it is null, so we do re-attach.
+  useEffect(() => {
+    const {
+      isScanning: scanActive,
+      activeProjectId,
+      streamToken,
+      streamLogCount,
+      abortController,
+    } = useScanStore.getState();
+    if (!scanActive || !activeProjectId || !streamToken || abortController) return;
+
+    useScanStore.getState().reconnectScan(activeProjectId);
+
+    // `streamLogCount` tells the backend which lines we already hold, so the replay
+    // tops the terminal up instead of duplicating every line on each navigate-back.
+    const source = new EventSource(
+      scanStreamReconnectUrl(activeProjectId, streamToken, streamLogCount)
+    );
+    let settled = false;
+
+    const closeStream = () => {
+      if (settled) return;
+      settled = true;
+      source.close();
+    };
+
+    source.onmessage = (raw) => {
+      let event: { type?: string; text?: string; message?: string; result?: any } | null = null;
+      try {
+        event = JSON.parse(raw.data);
+      } catch {
+        return; // Ignore heartbeats / malformed frames.
+      }
+      if (!event || typeof event !== "object") return;
+
+      if (event.type === "log" && typeof event.text === "string") {
+        useScanStore.getState().noteServerLog(event.text);
+      } else if (event.type === "complete") {
+        closeStream();
+        if (event.result) {
+          useScanStore.getState().completeScan(event.result);
+        } else {
+          useScanStore.setState({ isScanning: false, isReconnecting: false, streamToken: null });
+        }
+        toast.success(t("intake_progress_title") + " ✓");
+      } else if (event.type === "error") {
+        closeStream();
+        const message = event.message || "The resumed scan failed.";
+        useScanStore.getState().failScan(message);
+        toast.error(message);
+      }
+      // A "session" frame is ignored here: the token is already in the store.
+    };
+
+    source.onerror = () => {
+      // Closing right after the terminal frame can also fire `onerror`, so bail out
+      // when the scan already settled. Otherwise the stream is genuinely gone
+      // (backend restart, session TTL) — stop the browser's endless retry loop and
+      // surface it instead of spinning forever.
+      if (settled) return;
+      closeStream();
+      useScanStore.getState().markScanInterrupted(
+        "The live scan stream could not be resumed. Check Scan History for the final report."
+      );
+    };
+
+    return () => {
+      // Unmount only drops the connection. The Zustand state — and the scan itself —
+      // deliberately survives, so the next mount (or a reload) can resume it again.
+      closeStream();
+    };
+    // Runs once on mount: the decision is made from the persisted store snapshot.
+  }, []);
+
+  /**
+   * Persists the reconnect capability the backend sends as the first frame of every
+   * scan stream, so an interrupted scan can be resumed after navigating away or
+   * reloading the page.
+   */
+  const handleStreamSession = (session: ScanStreamSession) => {
+    useScanStore.getState().setStreamSession(session.project_id, session.stream_token);
+  };
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return "0 B";
@@ -459,6 +557,9 @@ export function Plagiarism() {
     const zipFile = isZipFlow ? archives[0] : undefined;
     const activeProjectName = projectName.trim() || (uploadedFiles[0].path.includes("/") ? uploadedFiles[0].path.split("/")[0] : "Intake_Project");
     const appendLog = (text: string) => useScanStore.getState().appendLog(text);
+    // Lines that arrive FROM the stream advance the resume cursor (see scanStore),
+    // so a later re-attach only replays what we missed.
+    const appendServerLog = (text: string) => useScanStore.getState().noteServerLog(text);
     const onComplete = (result?: any) => {
       appendLog(`[${new Date().toLocaleTimeString()}] [COMPLETED] ✅ Scan completed for ${activeProjectName}.`);
       if (result) {
@@ -505,7 +606,7 @@ export function Plagiarism() {
           body: formData,
           signal: controller.signal,
         });
-        const result = await readZipScanStream(response, appendLog);
+        const result = await readZipScanStream(response, appendServerLog, handleStreamSession);
         onComplete(result);
       } else {
         appendLog(`[${new Date().toLocaleTimeString()}] [INTAKE] Code files: ${stagedCodeCount}, Documents: ${stagedDocCount}, Total LOC: ${stagedLoc}`);
@@ -530,10 +631,11 @@ export function Plagiarism() {
           activeProjectName,
           payloadFiles,
           "Direct Upload Project Scan",
-          appendLog,
+          appendServerLog,
           onComplete,
           onError,
-          controller.signal
+          controller.signal,
+          handleStreamSession
         );
       }
     } catch (error) {
@@ -573,7 +675,7 @@ export function Plagiarism() {
     await plagiarismApi.scanGitRepoStream(
       payload,
       (logText) => {
-        useScanStore.getState().appendLog(logText);
+        useScanStore.getState().noteServerLog(logText);
       },
       (result) => {
         useScanStore.getState().completeScan(result);
@@ -584,7 +686,8 @@ export function Plagiarism() {
         useScanStore.getState().failScan(errorMsg);
         toast.error(errorMsg);
       },
-      controller.signal
+      controller.signal,
+      handleStreamSession
     );
   };
 
@@ -690,7 +793,7 @@ export function Plagiarism() {
           {uploadedFiles.length > 0 && activeTab === "direct" && (
             <button 
               onClick={clearUpload} 
-              className="px-3.5 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 text-xs font-semibold flex items-center gap-1.5 border border-red-500/20 transition-colors"
+              className="btn-danger px-3.5 py-2 rounded-xl text-xs gap-1.5"
             >
               <Trash2 className="w-4 h-4" />
               {t("clear_all")}
@@ -999,7 +1102,7 @@ export function Plagiarism() {
               {!isScanning && uploadedFiles.length > 0 && (
                 <button
                   onClick={clearUpload}
-                  className="w-full sm:w-auto px-6 py-3 rounded-lg font-medium text-danger border border-danger/30 hover:bg-danger/10 transition-colors flex items-center justify-center gap-2"
+                  className="btn-danger w-full sm:w-auto px-6 py-3"
                 >
                   <Trash2 className="w-4 h-4" />
                   {t("clear_uploads", "Clear Uploads")}
@@ -1009,7 +1112,7 @@ export function Plagiarism() {
               <button 
                 onClick={startDirectScan}
                 disabled={isScanning || isProcessingFiles || isTraversing || uploadedFiles.length === 0}
-                className="w-full sm:w-auto bg-gradient-to-r from-primary to-primary-hover hover:from-primary-hover hover:to-primary text-primary-text font-bold text-base rounded-xl px-8 py-3.5 shadow-[0_0_25px_rgba(239,68,68,0.25)] hover:shadow-[0_0_35px_rgba(239,68,68,0.4)] transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+                className="w-full sm:w-auto bg-primary hover:bg-primary-hover text-primary-text font-bold text-base rounded-xl px-8 py-3.5 shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
               >
                 {isScanning ? (
                   <>
@@ -1133,7 +1236,7 @@ export function Plagiarism() {
             <button 
               onClick={startGitScan}
               disabled={isScanning || !gitRepoUrl.trim()}
-              className="w-full sm:w-auto bg-gradient-to-r from-primary to-primary-hover hover:from-primary-hover hover:to-primary-hover text-primary-text font-bold text-base rounded-xl px-8 py-3.5 shadow-[0_0_25px_rgba(59,130,246,0.25)] hover:shadow-[0_0_35px_rgba(59,130,246,0.4)] transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+              className="w-full sm:w-auto bg-primary hover:bg-primary-hover text-primary-text font-bold text-base rounded-xl px-8 py-3.5 shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
             >
               {isScanning ? (
                 <>
@@ -1351,7 +1454,7 @@ export function Plagiarism() {
                       </button>
                       <button 
                         onClick={() => handleDeleteHistoryReport(h.id)}
-                        className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/20 text-xs transition-colors"
+                        className="btn-danger-icon"
                         title={t("delete_record")}
                       >
                         <Trash2 className="w-3.5 h-3.5" />

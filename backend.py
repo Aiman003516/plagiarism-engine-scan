@@ -17,6 +17,7 @@ import re
 import sys
 import time
 import uuid
+import hmac
 import json
 import shutil
 import tempfile
@@ -24,7 +25,7 @@ import subprocess
 import asyncio
 import difflib
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from contextlib import asynccontextmanager
 
 # Increase Starlette's max_files limit to allow uploading massive project folders
@@ -32,7 +33,7 @@ import starlette.formparsers
 starlette.formparsers.MultiPartParser.max_files = 100000
 starlette.formparsers.MultiPartParser.max_fields = 100000
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -123,7 +124,7 @@ DATA_DIR = Path(os.environ.get("PLAGIARISM_DATA_DIR", str(Path(__file__).parent 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Deep AI scan model cache (loaded once per server lifetime)
-_MODELS_DIR = os.environ.get("MODELS_DIR", r"D:\AI engine\models")
+_MODELS_DIR = os.environ.get("MODELS_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "models"))
 _deep_scan_models: Dict[str, Any] = {}
 _deep_scan_model_lock = threading.Lock()
 
@@ -541,7 +542,9 @@ def _clone_git_repo(repo_url: str, branch: str = "main", access_token: Optional[
         )
     except subprocess.CalledProcessError as e:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise HTTPException(status_code=400, detail=f"Git clone failed: {e.stderr}")
+        sanitized = re.sub(r'oauth2:[^@]+@', 'oauth2:****@', e.stderr or "")
+        sanitized = re.sub(r'://[^:]+:[^@]+@', '://****:****@', sanitized)
+        raise HTTPException(status_code=400, detail=f"Git clone failed: {sanitized}")
     except FileNotFoundError:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise HTTPException(status_code=500, detail="Git is not installed on the server.")
@@ -585,10 +588,17 @@ def _clone_git_repo(repo_url: str, branch: str = "main", access_token: Optional[
 # AUTHENTICATION & RBAC (JWT)
 # ============================================================================
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "ministry-plagiarism-secret-key-change-in-production")
-if JWT_SECRET == "ministry-plagiarism-secret-key-change-in-production":
+JWT_SECRET = os.environ.get("JWT_SECRET")
+if not JWT_SECRET:
+    import secrets as _secrets
+    JWT_SECRET = _secrets.token_hex(32)
     import warnings
-    warnings.warn("Using default JWT secret! Set JWT_SECRET environment variable in production.", stacklevel=2)
+    warnings.warn(
+        "JWT_SECRET not set in environment. Generated a random secret. "
+        "All tokens will be invalidated on server restart. "
+        "Set JWT_SECRET in your .env file for production.",
+        stacklevel=2,
+    )
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
@@ -949,7 +959,7 @@ async def create_user_endpoint(
     if not payload.password:
         raise HTTPException(status_code=400, detail="Password is required")
 
-    valid_roles = {"ministry_admin", "college_admin", "student"}
+    valid_roles = {"ministry_admin", "college_admin", "faculty", "student"}
     if payload.role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(sorted(valid_roles))}")
 
@@ -1017,7 +1027,7 @@ async def update_user_endpoint(
     if payload.password is not None:
         fields["password_hash"] = bcrypt.hashpw(payload.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
     if payload.role is not None:
-        valid_roles = {"ministry_admin", "college_admin", "student"}
+        valid_roles = {"ministry_admin", "college_admin", "faculty", "student"}
         if payload.role not in valid_roles:
             raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(sorted(valid_roles))}")
         fields["role"] = payload.role
@@ -1157,6 +1167,83 @@ async def list_project_files(project_id: str):
     return {"files": files}
 
 
+# ---------------------------------------------------------------------------
+# On-demand FAISS embedding indexing (decoupled from the upload stream)
+# ---------------------------------------------------------------------------
+def _index_project_embeddings(
+    vstore: VectorStore,
+    db_store: SystemDBStore,
+    project_id: str,
+    log_callback=None,
+) -> Dict[str, int]:
+    """(Re)build a project's FAISS embeddings from its DB-stored files.
+
+    Embedding generation was decoupled from the upload stream (``_run_intake``)
+    for performance, so every freshly uploaded project starts with an EMPTY
+    vector index. This routine is the single place that fills it: it is called
+    on demand by POST /api/plagiarism/projects/{project_id}/index-embeddings
+    and automatically by Deep Scan when a project has no vectors yet.
+
+    Any vectors already stored for the project are purged first, so repeated
+    calls stay idempotent instead of stacking duplicate embeddings for the
+    same files. Blocking by design (CodeBERT / BGE-M3 encoding) — callers run
+    it inside an executor so the event loop is never stalled.
+    """
+    files_data = db_store.get_project_files(project_id)
+
+    # Replace rather than append: keeps re-indexing idempotent.
+    vstore.delete_project(project_id)
+
+    added = vstore.index_project_files(
+        project_files=files_data,
+        project_id=project_id,
+        log_callback=log_callback,
+    )
+
+    print(
+        f"[FAISS] Project '{project_id}': indexed {added.get('code', 0)} code + "
+        f"{added.get('text', 0)} text vectors from {len(files_data)} stored files."
+    )
+    return added
+
+
+@app.post("/api/plagiarism/projects/{project_id}/index-embeddings")
+async def index_project_embeddings(project_id: str, user=Depends(require_role("ministry_admin", "college_admin", "faculty"))):
+    """On-demand Deep Scan indexer: generate a project's embeddings and add them to FAISS.
+
+    Uploads no longer build the vector index (see ``_run_intake``), so this
+    endpoint populates it explicitly. Safe to call repeatedly — stale vectors
+    for the project are replaced, never duplicated.
+    """
+    pid = (project_id or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="Missing 'project_id' in the request path.")
+
+    db_store = get_db()
+    if not db_store.get_project_by_id(pid):
+        raise HTTPException(status_code=404, detail=f"Project '{pid}' not found in database")
+
+    vstore = get_vstore()
+    print(
+        f"[FAISS] Embedding indexing requested for project '{pid}' "
+        f"by {user.get('role')} '{user.get('user_id')}'..."
+    )
+
+    try:
+        # Encoding is heavy (minutes on large projects): keep it on a worker
+        # thread so the event loop stays responsive.
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: _index_project_embeddings(vstore, db_store, pid, log_callback=print)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Embedding indexing failed for project '{pid}': {str(e)}",
+        )
+
+    return {"status": "indexed", "project_id": pid}
+
+
 @app.get("/api/plagiarism/projects/check")
 async def check_projects(names: str):
     name_list = [n.strip() for n in names.split(",") if n.strip()]
@@ -1245,6 +1332,191 @@ async def delete_scan_history_report(report_id: str):
     return {"status": "success", "message": f"Scan report '{report_id}' deleted"}
 
 
+# ---------------------------------------------------------------------------
+# Re-attachable SSE scan sessions
+# ---------------------------------------------------------------------------
+# The scan streams below are produced *inside* a POST request. When the browser
+# navigates away (or reloads), the response reader is dropped and — without help
+# — every later log line is lost, even though the worker thread keeps running to
+# completion. The client is then stuck showing a half-finished scan.
+#
+# A `ScanStreamSession` buffers every event it publishes and keeps a list of live
+# subscribers, so a client that comes back can (1) replay the events it missed and
+# (2) keep following the still-running scan over
+# `GET /api/plagiarism/scan-stream/{project_id}`.
+#
+# `EventSource` can neither POST nor send an `Authorization` header, so each
+# session mints an unguessable `stream_token` (delivered as the first frame of the
+# originating stream) that acts as a capability for re-attaching. The long-lived
+# JWT therefore never has to appear in a URL.
+_SCAN_SESSION_TTL_SECONDS = 3600
+_SCAN_SESSION_MAX = 32
+_SCAN_TERMINAL_EVENTS = ("complete", "error")
+
+
+class ScanStreamSession:
+    """Buffers and fans out the SSE events of a single running scan."""
+
+    def __init__(self, project_id: str, loop: asyncio.AbstractEventLoop):
+        self.project_id = project_id
+        self.stream_token = uuid.uuid4().hex
+        self.created_at = time.time()
+        self.last_event_at = self.created_at
+        self.done = False
+        self._loop = loop
+        self._lock = threading.Lock()
+        self._events: List[Dict[str, Any]] = []
+        self._subscribers: List[asyncio.Queue] = []
+
+    # -- publishing (called from executor worker threads) --------------------
+    def publish(self, event: Dict[str, Any]) -> None:
+        with self._lock:
+            self._events.append(event)
+            self.last_event_at = time.time()
+            if event.get("type") in _SCAN_TERMINAL_EVENTS:
+                self.done = True
+            # Fan out under the same lock that `subscribe()` snapshots the backlog
+            # with, so a client registering concurrently can neither miss this
+            # event nor receive it twice.
+            for queue in list(self._subscribers):
+                self._loop.call_soon_threadsafe(queue.put_nowait, event)
+
+    def publish_log(self, message: str) -> None:
+        self.publish({"type": "log", "text": message})
+
+    # -- subscribing ---------------------------------------------------------
+    def subscribe(self) -> Tuple[asyncio.Queue, List[Dict[str, Any]]]:
+        """Return `(queue, backlog)`; together they cover every event exactly once."""
+        queue: asyncio.Queue = asyncio.Queue()
+        with self._lock:
+            backlog = list(self._events)
+            # A finished session has nothing left to stream — replay only.
+            if not self.done:
+                self._subscribers.append(queue)
+        return queue, backlog
+
+    def unsubscribe(self, queue: asyncio.Queue) -> None:
+        with self._lock:
+            if queue in self._subscribers:
+                self._subscribers.remove(queue)
+
+    def header_event(self) -> Dict[str, Any]:
+        """First frame of the originating stream: lets the client persist the token."""
+        return {
+            "type": "session",
+            "project_id": self.project_id,
+            "stream_token": self.stream_token,
+            "reconnect_url": (
+                f"/api/plagiarism/scan-stream/{self.project_id}"
+                f"?token={self.stream_token}"
+            ),
+        }
+
+
+_scan_sessions: Dict[str, ScanStreamSession] = {}
+_scan_sessions_lock = threading.Lock()
+
+
+def _prune_scan_sessions_locked() -> None:
+    """Drop expired/finished sessions. Caller must hold `_scan_sessions_lock`."""
+    now = time.time()
+    for project_id in [
+        pid for pid, session in _scan_sessions.items()
+        if now - session.last_event_at > _SCAN_SESSION_TTL_SECONDS
+    ]:
+        del _scan_sessions[project_id]
+
+    overflow = len(_scan_sessions) - _SCAN_SESSION_MAX
+    if overflow > 0:
+        # Evict finished sessions oldest-first; a running scan is never evicted.
+        finished = sorted(
+            (session for session in _scan_sessions.values() if session.done),
+            key=lambda session: session.last_event_at,
+        )
+        for session in finished[:overflow]:
+            _scan_sessions.pop(session.project_id, None)
+
+
+def _start_scan_session(project_id: str) -> ScanStreamSession:
+    """Register (replacing any previous one) and return the session for a project."""
+    session = ScanStreamSession(project_id, asyncio.get_event_loop())
+    with _scan_sessions_lock:
+        _prune_scan_sessions_locked()
+        _scan_sessions[project_id] = session
+    return session
+
+
+def _get_scan_session(project_id: str, token: Optional[str]) -> Optional[ScanStreamSession]:
+    """Look a session up, validating the reconnect capability token."""
+    with _scan_sessions_lock:
+        session = _scan_sessions.get(project_id)
+    if session is None or not token:
+        return None
+    # Constant-time compare: the token is the only credential this endpoint has.
+    if not hmac.compare_digest(session.stream_token, token):
+        return None
+    return session
+
+
+async def _stream_scan_events(session: ScanStreamSession, skip_logs: int = 0):
+    """Yield SSE frames: replay the missed backlog, then follow the live queue.
+
+    `skip_logs` is the re-attaching client's resume cursor: how many log lines it
+    already holds. The replay then tops the client up instead of repeating the
+    whole terminal every time the user navigates back to the page.
+    """
+    queue, backlog = session.subscribe()
+    try:
+        remaining = max(0, skip_logs)
+        for event in backlog:
+            if event.get("type") == "log" and remaining > 0:
+                remaining -= 1
+                continue
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+            if event.get("type") in _SCAN_TERMINAL_EVENTS:
+                return
+        if session.done:
+            return
+        while True:
+            event = await queue.get()
+            yield f"data: {json.dumps(event, default=str)}\n\n"
+            if event.get("type") in _SCAN_TERMINAL_EVENTS:
+                break
+    finally:
+        session.unsubscribe(queue)
+
+
+@app.get("/api/plagiarism/scan-stream/{project_id}")
+async def reconnect_scan_stream(
+    project_id: str,
+    token: str = Query(...),
+    after: int = Query(0, ge=0),
+):
+    """Re-attach to a running (or just-finished) scan stream.
+
+    Deliberately a GET with the capability token in the query string: this is the
+    endpoint an `EventSource` reconnects to, and `EventSource` cannot POST or send
+    an `Authorization` header. The token is a per-scan random secret handed to the
+    client on the originating (JWT-authenticated) stream, so it grants read access
+    to exactly this project's scan log and nothing else.
+
+    `after` is the number of log lines the client already has, so the replay only
+    sends what it missed (SSE `Last-Event-ID` cannot be used here because the
+    client builds a fresh `EventSource` rather than letting the browser retry).
+    """
+    session = _get_scan_session(project_id, token)
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No resumable scan stream for project '{project_id}'",
+        )
+    return StreamingResponse(
+        _stream_scan_events(session, skip_logs=after),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # --- Upload + Scan (JSON response) ---
 @app.post("/api/plagiarism/upload-scan", dependencies=[Depends(require_role())])
 async def upload_and_scan(
@@ -1254,10 +1526,22 @@ async def upload_and_scan(
 ):
     extracted_files = []
     for upload_file in files:
-        content = (await upload_file.read()).decode("utf-8", errors="ignore")
+        raw = await upload_file.read()
         filename = upload_file.filename or "unknown"
         ext = Path(filename).suffix.lower()
         file_type = FileExtractor.categorize_file(filename)
+        # Use FileExtractor for binary formats (PDF, DOCX); fall back to UTF-8 for plain text/code
+        if ext in (".pdf", ".docx", ".doc"):
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                tmp.write(raw)
+                tmp_path = tmp.name
+            try:
+                content = FileExtractor().extract_file(tmp_path) or ""
+            finally:
+                os.unlink(tmp_path)
+        else:
+            content = raw.decode("utf-8", errors="ignore")
         extracted_files.append({
             "relative_path": filename,
             "filename": Path(filename).name,
@@ -1285,10 +1569,21 @@ async def upload_and_scan_stream(
     extracted_files = []
     for upload_file in files:
         raw = await upload_file.read()
-        content = raw.decode("utf-8", errors="ignore")
         filename = upload_file.filename or "unknown"
         ext = Path(filename).suffix.lower()
         file_type = FileExtractor.categorize_file(filename)
+        # Use FileExtractor for binary formats (PDF, DOCX); fall back to UTF-8 for plain text/code
+        if ext in (".pdf", ".docx", ".doc"):
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                tmp.write(raw)
+                tmp_path = tmp.name
+            try:
+                content = FileExtractor().extract_file(tmp_path) or ""
+            finally:
+                os.unlink(tmp_path)
+        else:
+            content = raw.decode("utf-8", errors="ignore")
         extracted_files.append({
             "relative_path": filename,
             "filename": Path(filename).name,
@@ -1297,30 +1592,37 @@ async def upload_and_scan_stream(
             "content": content,
         })
 
+    # Register the resumable session BEFORE streaming so a client that navigates
+    # away mid-scan can re-attach via GET /api/plagiarism/scan-stream/{project}.
+    session = _start_scan_session(project_name)
+
     async def event_stream():
-        q = asyncio.Queue()
         loop = asyncio.get_running_loop()
 
         def log_callback(msg: str):
-            loop.call_soon_threadsafe(q.put_nowait, {"type": "log", "text": msg})
+            session.publish_log(msg)
 
         def run_intake():
             try:
                 res = _run_intake(project_name, extracted_files, log_callback=log_callback)
-                loop.call_soon_threadsafe(q.put_nowait, {"type": "complete", "result": res})
+                session.publish({"type": "complete", "result": res})
             except Exception as e:
-                loop.call_soon_threadsafe(q.put_nowait, {"type": "error", "message": str(e)})
+                session.publish({"type": "error", "message": str(e)})
+
+        # Hand the client its reconnect capability before any work starts.
+        session.publish(session.header_event())
 
         # Start the background thread
         executor_task = loop.run_in_executor(None, run_intake)
 
-        while True:
-            event = await q.get()
-            yield f"data: {json.dumps(event, default=str)}\n\n"
-            if event["type"] in ("complete", "error"):
-                break
+        async for frame in _stream_scan_events(session):
+            yield frame
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # --- Upload + Scan ZIP Archive (SSE Streaming) ---
@@ -1334,12 +1636,14 @@ async def upload_zip_stream(
 
     tmp_dir = tempfile.mkdtemp(prefix="plagiarism_zip_")
 
+    # Resumable session — see `_start_scan_session` and the reconnect endpoint.
+    session = _start_scan_session(project_name)
+
     async def event_stream():
-        q = asyncio.Queue()
         loop = asyncio.get_running_loop()
 
         def log_callback(msg: str):
-            loop.call_soon_threadsafe(q.put_nowait, {"type": "log", "text": msg})
+            session.publish_log(msg)
 
         def run_zip_intake():
             try:
@@ -1381,21 +1685,27 @@ async def upload_zip_stream(
                         f["relative_path"] = f.get("filename", "")
 
                 res = _run_intake(project_name, extracted_files, log_callback=log_callback)
-                loop.call_soon_threadsafe(q.put_nowait, {"type": "complete", "result": res})
+                session.publish({"type": "complete", "result": res})
             except Exception as e:
-                loop.call_soon_threadsafe(q.put_nowait, {"type": "error", "message": str(e)})
+                session.publish({"type": "error", "message": str(e)})
             finally:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
 
+        # Hand the client its reconnect capability before any work starts.
+        session.publish(session.header_event())
+
         executor_task = loop.run_in_executor(None, run_zip_intake)
 
-        while True:
-            event = await q.get()
-            yield f"data: {json.dumps(event, default=str)}\n\n"
-            if event["type"] in ("complete", "error"):
-                break
+        async for frame in _stream_scan_events(session):
+            yield frame
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # --- Git Repo Scan (JSON) ---
 @app.post("/api/plagiarism/git-scan", dependencies=[Depends(require_role())])
 async def git_scan(payload: GitScanRequest):
@@ -1419,13 +1729,16 @@ async def git_scan(payload: GitScanRequest):
 # --- Git Repo Scan (SSE Streaming) ---
 @app.post("/api/plagiarism/git-scan-stream", dependencies=[Depends(require_role())])
 async def git_scan_stream(payload: GitScanRequest):
+    # Resolve the project id up-front so the resumable session can be keyed by it
+    # (the worker below previously derived it only after cloning).
+    project_name = payload.project_name or Path(payload.repo_url.rstrip("/")).stem
+    session = _start_scan_session(project_name)
 
     async def event_stream():
-        q = asyncio.Queue()
         loop = asyncio.get_running_loop()
 
         def log_callback(msg: str):
-            loop.call_soon_threadsafe(q.put_nowait, {"type": "log", "text": msg})
+            session.publish_log(msg)
 
         def run_git_intake():
             tmp_dir = None
@@ -1434,7 +1747,6 @@ async def git_scan_stream(payload: GitScanRequest):
                     payload.repo_url, payload.branch or "main", payload.access_token, log_callback=log_callback
                 )
 
-                project_name = payload.project_name or Path(payload.repo_url.rstrip("/")).stem
                 log_callback(f"📂 Scanning project directory: {project_name}...")
                 extracted_files = FileExtractor.scan_project_directory(tmp_dir)
 
@@ -1447,22 +1759,26 @@ async def git_scan_stream(payload: GitScanRequest):
                     log_callback=log_callback,
                     git_metadata=git_metadata,
                 )
-                loop.call_soon_threadsafe(q.put_nowait, {"type": "complete", "result": res})
+                session.publish({"type": "complete", "result": res})
             except Exception as e:
-                loop.call_soon_threadsafe(q.put_nowait, {"type": "error", "message": str(e)})
+                session.publish({"type": "error", "message": str(e)})
             finally:
                 if tmp_dir:
                     shutil.rmtree(tmp_dir, ignore_errors=True)
 
+        # Hand the client its reconnect capability before any work starts.
+        session.publish(session.header_event())
+
         executor_task = loop.run_in_executor(None, run_git_intake)
 
-        while True:
-            event = await q.get()
-            yield f"data: {json.dumps(event, default=str)}\n\n"
-            if event["type"] in ("complete", "error"):
-                break
+        async for frame in _stream_scan_events(session):
+            yield frame
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # --- Named scan on already-indexed project ---
@@ -1646,6 +1962,26 @@ async def deep_scan_bulk(req: BulkDeepScanRequest):
         )
 
     vstore = get_vstore()
+
+    # Embedding generation is decoupled from the upload stream, so a project
+    # that was never deep-indexed holds ZERO vectors and search_bulk() would
+    # silently return an empty result. Build the index on demand first so Deep
+    # Scan always works, even when the user never indexed manually.
+    try:
+        if vstore.count_project_vectors(project_id) == 0:
+            print(
+                f"[FAISS] Project '{project_id}' has no vectors yet; "
+                f"auto-indexing before bulk deep scan..."
+            )
+            await asyncio.get_event_loop().run_in_executor(
+                None, lambda: _index_project_embeddings(vstore, db, project_id)
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Deep scan auto-indexing failed for project '{project_id}': {str(e)}",
+        )
+
     try:
         matches = await asyncio.get_event_loop().run_in_executor(
             None, lambda: vstore.search_bulk(project_id)

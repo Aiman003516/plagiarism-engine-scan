@@ -5,6 +5,28 @@
 
 export const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "http://127.0.0.1:8000";
 
+/**
+ * First frame of every scan stream. Carries the per-scan capability token that
+ * authorises re-attaching to a still-running scan over
+ * `GET /api/plagiarism/scan-stream/{project_id}` — the endpoint an `EventSource`
+ * resumes on after the user navigates away or reloads. `EventSource` can neither
+ * POST nor send an `Authorization` header, hence the token in the query string.
+ */
+export interface ScanStreamSession {
+  project_id: string;
+  stream_token: string;
+  reconnect_url?: string;
+}
+
+/** Absolute `EventSource` URL used to resume listening to a running scan.
+ *  `after` is the number of log lines the client already has, so the server only
+ *  replays what was missed instead of duplicating the whole terminal. */
+export const scanStreamReconnectUrl = (projectId: string, streamToken: string, after = 0): string => {
+  const cursor = Math.max(0, Math.floor(after) || 0);
+  return `${API_BASE_URL}/api/plagiarism/scan-stream/${encodeURIComponent(projectId)}`
+    + `?token=${encodeURIComponent(streamToken)}&after=${cursor}`;
+};
+
 export class ApiError extends Error {
   status: number;
   data: any;
@@ -348,7 +370,8 @@ export const plagiarismApi = {
     onLog: (logText: string) => void,
     onComplete: (result: PlagiarismScanResult) => void,
     onError: (errorText: string) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onSession?: (session: ScanStreamSession) => void
   ) => {
     const url = `${API_BASE_URL}/api/plagiarism/upload-scan-stream`;
     const token = localStorage.getItem("auth_token");
@@ -405,7 +428,10 @@ export const plagiarismApi = {
             const jsonStr = trimmed.replace(/^data:\s*/, "");
             try {
               const msg = JSON.parse(jsonStr);
-              if (msg.type === "log" && msg.text) {
+              if (msg.type === "session" && msg.stream_token) {
+                // Reconnect capability: lets the UI re-attach after navigation/reload.
+                onSession?.(msg as ScanStreamSession);
+              } else if (msg.type === "log" && msg.text) {
                 onLog(msg.text);
               } else if (msg.type === "complete" && msg.result) {
                 streamCompleted = true;
@@ -435,7 +461,8 @@ export const plagiarismApi = {
     onLog: (logText: string) => void,
     onComplete: (result: PlagiarismScanResult) => void,
     onError: (errorText: string) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onSession?: (session: ScanStreamSession) => void
   ) => {
     const url = `${API_BASE_URL}/api/plagiarism/upload-zip-stream`;
     const token = localStorage.getItem("auth_token");
@@ -484,7 +511,10 @@ export const plagiarismApi = {
             const jsonStr = trimmed.replace(/^data:\s*/, "");
             try {
               const msg = JSON.parse(jsonStr);
-              if (msg.type === "log" && msg.text) {
+              if (msg.type === "session" && msg.stream_token) {
+                // Reconnect capability: lets the UI re-attach after navigation/reload.
+                onSession?.(msg as ScanStreamSession);
+              } else if (msg.type === "log" && msg.text) {
                 onLog(msg.text);
               } else if (msg.type === "complete" && msg.result) {
                 streamCompleted = true;
@@ -518,7 +548,8 @@ export const plagiarismApi = {
     onLog: (logText: string) => void,
     onComplete: (result: PlagiarismScanResult) => void,
     onError: (errorText: string) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onSession?: (session: ScanStreamSession) => void
   ) => {
     const url = `${API_BASE_URL}/api/plagiarism/git-scan-stream`;
     const token = localStorage.getItem("auth_token");
@@ -563,7 +594,10 @@ export const plagiarismApi = {
             const jsonStr = trimmed.replace(/^data:\s*/, "");
             try {
               const msg = JSON.parse(jsonStr);
-              if (msg.type === "log" && msg.text) {
+              if (msg.type === "session" && msg.stream_token) {
+                // Reconnect capability: lets the UI re-attach after navigation/reload.
+                onSession?.(msg as ScanStreamSession);
+              } else if (msg.type === "log" && msg.text) {
                 onLog(msg.text);
               } else if (msg.type === "complete" && msg.result) {
                 streamCompleted = true;

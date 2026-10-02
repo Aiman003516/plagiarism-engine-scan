@@ -132,17 +132,22 @@ export default function Teams() {
           <RefreshCw className="w-6 h-6 animate-spin text-accent" />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="glass-panel p-10 text-center text-text-muted">
-          <Users className="w-8 h-8 mx-auto mb-3 opacity-50" />
+        <div className="glass-panel p-10 text-center text-text-muted rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+          <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-500/10 text-teal-500">
+            <Users className="w-6 h-6" />
+          </span>
           {t("no_teams_found")}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((team) => (
-            <div key={team.id} className="glass-card">
+            <div
+              key={team.id}
+              className="glass-card rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800"
+            >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary text-primary-text flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-xl bg-teal-500/10 text-teal-500 flex items-center justify-center">
                     <Users className="w-5 h-5" />
                   </div>
                   <div>
@@ -154,7 +159,7 @@ export default function Teams() {
                 </div>
                 <button
                   onClick={() => deleteTeam(team)}
-                  className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors"
+                  className="btn-danger-icon"
                   title={t("delete")}
                 >
                   <Trash2 className="w-4 h-4" />
@@ -162,7 +167,7 @@ export default function Teams() {
               </div>
               <button
                 onClick={() => openTeam(team)}
-                className="mt-4 w-full py-2 rounded-lg border border-border text-sm text-text-main hover:bg-surface/50 transition-colors"
+                className="btn-secondary mt-4 w-full py-2 text-sm"
               >
                 {t("members")}
               </button>
@@ -172,7 +177,7 @@ export default function Teams() {
       )}
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="glass-panel w-full max-w-md p-6">
+          <div className="glass-panel w-full max-w-md p-6 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800">
             <h2 className="text-lg font-semibold text-text-main mb-4">{t("add_team")}</h2>
             <label className="block text-sm font-medium text-text-main mb-1.5">
               {t("team_name")}
@@ -201,7 +206,7 @@ export default function Teams() {
 
       {activeTeam && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="glass-panel w-full max-w-xl max-h-[80vh] flex flex-col">
+          <div className="glass-panel w-full max-w-xl max-h-[80vh] flex flex-col rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between p-5 border-b border-border">
               <h2 className="text-lg font-semibold text-text-main">{activeTeam.name}</h2>
               <button
@@ -241,7 +246,7 @@ export default function Teams() {
                         </div>
                         <button
                           onClick={() => removeMember(m.id)}
-                          className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10"
+                          className="btn-danger-icon"
                           title={t("remove")}
                         >
                           <X className="w-4 h-4" />

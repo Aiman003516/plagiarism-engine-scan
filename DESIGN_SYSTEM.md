@@ -22,6 +22,63 @@ The system utilizes a distinctive, high-end palette based on Deep Emerald (`#013
 * **Text (`--foreground`):** Crisp Cream/White (`#f4f3ec`).
 * **Primary Accents (`--primary`):** Butter (`#ffefb3`) backgrounds with Deep Emerald text. Butter pops brilliantly in dark mode, instantly drawing the eye to primary actions.
 
+### 1.1 Semantic Status & Metric Palette (multi-color layer)
+The Emerald & Butter pair owns **brand identity only**. Status and metrics use a
+separate, explicit semantic palette so a screen can be read by colour alone.
+
+Defined as raw RGB triplets in `:root` / `.dark` in `frontend/src/index.css` so
+Tailwind opacity modifiers (`bg-success/10`) keep working, and surfaced as
+utilities through `@theme inline reference`
+(`--color-success: rgb(var(--success) / <alpha-value>)`).
+
+| Token | Light | Dark | Meaning |
+| --- | --- | --- | --- |
+| `--success` | `16 185 129` (emerald-500) | `52 211 153` (emerald-400) | Safe / approved / clean / resolved |
+| `--danger` | `239 68 68` (red-500) | `248 113 113` (red-400) | Flagged / destructive / error |
+| `--warning` | `245 158 11` (amber-500) | `251 191 36` (amber-400) | Pending / at-risk / in progress |
+| `--info` | `59 130 246` (blue-500) | `96 165 250` (blue-400) | Informational / neutral highlight |
+| `--metric-purple` | `168 85 247` (purple-500) | `192 132 252` (purple-400) | Users & identities |
+| `--metric-teal` | `20 184 166` (teal-500) | `45 212 191` (teal-400) | Teams & groups |
+
+Dark mode lifts every hue to its 400-level shade — saturated 500-level colours
+lose contrast against the obsidian background.
+
+**Dashboard KPI tone map** (`TONES` in `frontend/src/pages/Dashboard.tsx`). Each
+tone owns an icon badge, a hint colour and a mini progress bar; the card shell
+stays neutral (`rounded-2xl`, `shadow-sm`, `border-slate-200/800`) so the hue pops:
+
+| Metric | Tone |
+| --- | --- |
+| Total Projects | blue |
+| Total Teams | teal |
+| Total Users | purple |
+| Total Files | amber |
+| Safe Projects | emerald |
+| Flagged Scans | red |
+
+**Similarity gradient** (shared by `Dashboard.tsx` and `Plagiarism.tsx`):
+`>= 70% -> text-red-500`, `40–69% -> text-amber-500`, `< 40% -> text-emerald-500`.
+
+**Badge shape** for every status pill:
+`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ring-1`
+plus the tone's `bg-*-500/10 text-*-500 ring-*-500/20`.
+
+### 1.2 Button Hierarchy (strict)
+One primary action per view. Use the classes from `index.css`, never ad-hoc
+colour strings:
+
+| Class | Use for |
+| --- | --- |
+| `.btn-primary` | The single main action of a view (Start Scan, Add Team, Save). Solid brand. |
+| `.btn-secondary` | Supporting actions (View Members, Download CSV, Reset, Cancel). Outlined. |
+| `.btn-danger` | Explicit destructive action with a label (Clear All, Clear Uploads). Solid red. |
+| `.btn-danger-icon` | Destructive icon-only row action (Trash). Quiet red, intensifies on hover. |
+
+Destructive actions **never** use the brand colour, and never use the faint
+`bg-danger/10` ghost treatment, which used to read as decoration rather than as
+a warning.
+
+
 ---
 
 ## 2. Typography & Core UI Rules

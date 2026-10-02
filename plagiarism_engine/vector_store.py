@@ -334,6 +334,26 @@ class VectorStore:
             return removed
 
     # ------------------------------------------------------------------
+    # Inspection
+    # ------------------------------------------------------------------
+    def count_project_vectors(self, project_id: str) -> int:
+        """
+        Number of vectors currently held in the FAISS indices for
+        ``project_id`` (``0`` == the project has never been deep-indexed).
+
+        Read-only and cheap: it scans the in-memory JSON ID mapping, which is
+        the authoritative record of which int64 IDs belong to which project.
+        Lets callers decide whether embeddings must be generated on demand
+        before running ``search_bulk()``.
+        """
+        with self._lock:
+            return sum(
+                1
+                for meta in self._mapping.get("vectors", {}).values()
+                if meta.get("project_id") == project_id
+            )
+
+    # ------------------------------------------------------------------
     # Bulk semantic search
     # ------------------------------------------------------------------
     def search_bulk(self, project_id: str, top_k: int = DEFAULT_TOP_K) -> List[Dict[str, Any]]:

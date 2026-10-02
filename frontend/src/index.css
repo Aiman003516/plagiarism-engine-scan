@@ -22,10 +22,32 @@
   --color-accent-text: rgb(var(--accent-text));
   --color-accent-light: rgba(var(--accent), 0.15);
 
-  --color-success: #10b981;
-  --color-warning: #f59e0b;
-  --color-danger: #ef4444;
   --color-danger-text: rgb(var(--danger-text));
+}
+
+/* ---------------------------------------------------------------------------
+   SEMANTIC PALETTE → TAILWIND UTILITIES
+   ---------------------------------------------------------------------------
+   The raw `R G B` triplets are declared per-mode in `:root` / `.dark` below.
+
+   • `inline`    → Tailwind substitutes the *resolved value* into each utility
+                   (`.text-danger { color: rgb(var(--color-danger)) }`) instead
+                   of pointing at a second, self-referencing variable.
+   • `reference` → these tokens are only used to generate utilities, so no
+                   duplicate `--color-*` declarations are emitted — the single
+                   source of truth stays the `:root` / `.dark` blocks.
+
+   Result: `text-success`, `bg-danger/10`, `ring-info/20`, `text-metric-purple`
+   … behave exactly like built-in Tailwind colors, follow the active light/dark
+   theme, and support opacity modifiers because the token is a bare triplet.
+   --------------------------------------------------------------------------- */
+@theme inline reference {
+  --color-success: rgb(var(--color-success));            /* safe / approved    */
+  --color-danger: rgb(var(--color-danger));              /* flagged / destructive */
+  --color-warning: rgb(var(--color-warning));            /* pending / caution  */
+  --color-info: rgb(var(--color-info));                  /* neutral info       */
+  --color-metric-purple: rgb(var(--color-metric-purple));/* KPI accent (users) */
+  --color-metric-teal: rgb(var(--color-metric-teal));    /* KPI accent (teams) */
 }
 
 @layer base {
@@ -51,6 +73,17 @@
 
     /* Readable red for highlighted (copied) diff lines on a light surface */
     --danger-text: 185 28 28;
+
+    /* ── Semantic Palette (Light: 500-step of each hue) ─────────────────
+       Stored as bare `R G B` triplets so every utility can apply an alpha
+       modifier — `bg-success/10`, `ring-danger/20`, `bg-info/5` — without
+       needing a separate "-soft" token per color. */
+    --color-success: 16 185 129;         /* Emerald 500 — safe, approved, clean */
+    --color-danger: 239 68 68;           /* Red 500     — flagged, destructive  */
+    --color-warning: 245 158 11;         /* Amber 500   — pending, caution      */
+    --color-info: 59 130 246;            /* Blue 500    — neutral info, volumes */
+    --color-metric-purple: 139 92 246;   /* Violet 500  — KPI accent (users)    */
+    --color-metric-teal: 20 184 166;     /* Teal 500    — KPI accent (teams)    */
   }
 
   .dark {
@@ -75,6 +108,17 @@
 
     /* Readable red for highlighted (copied) diff lines on a dark surface */
     --danger-text: 248 113 113;
+
+    /* ── Semantic Palette (Dark: lifted to the 400-step) ────────────────
+       Each hue is brightened one step so the semantic colors keep a ≥4.5:1
+       contrast ratio against the lifted charcoal-green surfaces and never
+       read as muddy on the dark canvas. */
+    --color-success: 52 211 153;         /* Emerald 400 */
+    --color-danger: 248 113 113;         /* Red 400     */
+    --color-warning: 251 191 36;         /* Amber 400   */
+    --color-info: 96 165 250;            /* Blue 400    */
+    --color-metric-purple: 167 139 250;  /* Violet 400  */
+    --color-metric-teal: 45 212 191;     /* Teal 400    */
   }
 
   html, body {
@@ -136,8 +180,28 @@
     @apply bg-accent text-accent-text;
   }
 
+  /* ── Button hierarchy ──────────────────────────────────────────────────
+     1. `.btn-primary`     → THE vivid, solid brand action of a view
+                             (Run Scan, Save, Create…). One per region.
+     2. `.btn-secondary`   → neutral/outlined support action, never competes.
+     3. `.btn-danger`      → destructive, always explicitly red — never the
+                             brand color, so a mis-click is never ambiguous.
+     4. `.btn-danger-icon` → compact destructive icon action for dense tables;
+                             tinted at rest, solid red on hover.            */
   .btn-primary {
-    @apply bg-gradient-to-r from-primary to-primary-hover text-primary-text font-medium rounded-lg px-4 py-2 hover:opacity-90 transition-opacity flex items-center justify-center gap-2;
+    @apply bg-primary hover:bg-primary-hover text-primary-text font-semibold rounded-lg px-4 py-2 shadow-sm transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-surface hover:bg-surface-hover border border-border text-text-main font-medium rounded-lg px-4 py-2 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-danger {
+    @apply bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg px-4 py-2 shadow-sm transition-colors flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-danger-icon {
+    @apply p-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500 hover:border-red-500 hover:text-white transition-colors;
   }
 
   .input-field {

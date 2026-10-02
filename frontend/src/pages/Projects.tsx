@@ -131,12 +131,14 @@ export default function Projects() {
           <RefreshCw className="w-6 h-6 animate-spin text-accent" />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="glass-panel p-10 text-center text-text-muted">
-          <FolderOpen className="w-8 h-8 mx-auto mb-3 opacity-50" />
+        <div className="glass-panel p-10 text-center text-text-muted rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+          <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-500">
+            <FolderOpen className="w-6 h-6" />
+          </span>
           {t("no_projects_found")}
         </div>
       ) : (
-        <div className="glass-panel overflow-hidden">
+        <div className="glass-panel overflow-hidden rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur">
@@ -153,12 +155,19 @@ export default function Projects() {
                 {paged.map((p) => (
                   <tr key={p.id} className="hover:bg-surface/50 transition-colors border-b border-border/40 last:border-0">
                     <td className="py-3 px-4">
-                      <div className="font-medium text-text-main">{p.title || p.name}</div>
-                      {p.abstract && (
-                        <div className="text-xs text-text-muted truncate max-w-[280px]">
-                          {p.abstract}
+                      <div className="flex items-start gap-3">
+                        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
+                          <FolderOpen className="w-4 h-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="font-medium text-text-main truncate">{p.title || p.name}</div>
+                          {p.abstract && (
+                            <div className="text-xs text-text-muted truncate max-w-[280px]">
+                              {p.abstract}
+                            </div>
+                          )}
                         </div>
-                      )}
+                      </div>
                     </td>
                     <td className="py-3 px-4 text-text-muted">{p.university || "—"}</td>
                     <td className="py-3 px-4 text-text-muted">{p.department || "—"}</td>
@@ -167,8 +176,8 @@ export default function Projects() {
                       <span
                         className={
                           p.status === "pending"
-                            ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-500/15 dark:text-yellow-400 px-2 py-1 rounded text-xs font-semibold"
-                            : "bg-success/20 text-success px-2 py-1 rounded text-xs"
+                            ? "inline-flex items-center rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-500 ring-1 ring-amber-500/20"
+                            : "inline-flex items-center rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-500 ring-1 ring-emerald-500/20"
                         }
                       >
                         {p.status?.toUpperCase() || "APPROVED"}
@@ -180,7 +189,7 @@ export default function Projects() {
                           <button
                             onClick={() => approveProject(p)}
                             disabled={approvingId === p.id}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-success/20 text-success hover:bg-success/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-500 text-white shadow-sm hover:bg-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             title={t("approve")}
                           >
                             {approvingId === p.id ? (
@@ -200,7 +209,7 @@ export default function Projects() {
                         </button>
                         <button
                           onClick={() => deleteProject(p)}
-                          className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors"
+                          className="btn-danger-icon"
                           title={t("delete")}
                         >
                           <Trash2 className="w-4 h-4" />
@@ -240,7 +249,7 @@ export default function Projects() {
       )}
       {filesProject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="glass-panel w-full max-w-2xl max-h-[80vh] flex flex-col">
+          <div className="glass-panel w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between p-5 border-b border-border">
               <h2 className="text-lg font-semibold text-text-main">
                 {filesProject.project.title || filesProject.project.name} — {t("view_files")}

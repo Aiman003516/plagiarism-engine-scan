@@ -1,10 +1,0 @@
-C:\Users\Ayman\AppData\Local\Programs\Python\Python312\Lib\importlib\__init__.py:90: UserWarning: Using default JWT secret! Set JWT_SECRET environment variable in production.
-  return _bootstrap._gcd_import(name[level:], package, level)
-INFO:     Started server process [34260]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights:  98%|#########7| 195/199 [00:00<00:00, 1948.60it/s]Loading weights: 100%|##########| 199/199 [00:00<00:00, 1968.81it/s]
-Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights:  53%|#####2    | 206/391 [00:00<00:00, 2026.06it/s]Loading weights: 100%|##########| 391/391 [00:00<00:00, 1930.62it/s]
-Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|##########| 103/103 [00:00<00:00, 2251.04it/s]
-Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|##########| 199/199 [00:00<00:00, 2188.85it/s]

@@ -85,3 +85,9 @@ Thumbs.db
 !frontend/src/lib/
 !frontend/src/lib/**
 
+
+# Temporary logs and benchmark scripts
+server_err.log
+server_out.log
+bench_faiss_before.py
+verify_upload_perf.py
