@@ -70,15 +70,29 @@ function buildRows(opcodes: DiffOpcode[], lines: string[], side: 'a' | 'b'): Dif
   return rows;
 }
 
-function DiffPane({ title, rows }: { title: string; rows: DiffRow[] }) {
+function isRTL(lines: string[]): boolean {
+  const text = lines.slice(0, 50).join('');
+  const arabicMatch = text.match(/[\u0600-\u06FF]/g);
+  const latinMatch = text.match(/[a-zA-Z]/g);
+  const arabic = arabicMatch ? arabicMatch.length : 0;
+  const latin = latinMatch ? latinMatch.length : 0;
+  return arabic > latin && arabic > 0;
+}
+
+function DiffPane({ title, rows, rtl }: { title: string; rows: DiffRow[], rtl?: boolean }) {
+  const fontStyle = rtl ? { fontFamily: "'Noto Sans Arabic', 'Amiri', monospace" } : {};
   return (
     <div className="flex-1 min-w-0 flex flex-col rounded-lg overflow-hidden border border-border/50 dark:border-slate-700 bg-background dark:bg-slate-900">
       <div className="px-3 py-2 border-b border-border/50 dark:border-slate-700 bg-surface/60 dark:bg-slate-800">
-        <div className="font-mono text-xs text-text-main truncate" title={title}>
+        <div className="font-mono text-xs text-text-main truncate" title={title} dir={rtl ? "rtl" : "ltr"}>
           {title}
         </div>
       </div>
-      <pre className="flex-1 m-0 overflow-auto max-h-[60vh] p-2 font-mono text-xs leading-5 text-text-main">
+      <pre 
+        dir={rtl ? "rtl" : "ltr"}
+        style={fontStyle}
+        className="flex-1 m-0 overflow-auto max-h-[60vh] p-2 font-mono text-xs leading-5 text-text-main"
+      >
         {rows.map((row, idx) => (
           <div
             key={idx}
@@ -86,7 +100,7 @@ function DiffPane({ title, rows }: { title: string; rows: DiffRow[] }) {
               row.lineNo === null ? 'bg-surface/50 dark:bg-slate-800/50' : ''
             }`}
           >
-            <span className="w-9 shrink-0 text-right select-none text-text-muted/70">
+            <span className={`w-9 shrink-0 select-none text-text-muted/70 ${rtl ? 'text-left' : 'text-right'}`}>
               {row.lineNo ?? ''}
             </span>
             {row.matched ? (
@@ -174,8 +188,8 @@ export default function DiffViewer({ projectA, fileA, projectB, fileB }: DiffVie
       </div>
 
       <div className="flex flex-col lg:flex-row gap-4">
-        <DiffPane title={`${projectA} — ${fileA}`} rows={rowsA} />
-        <DiffPane title={`${projectB} — ${fileB}`} rows={rowsB} />
+        <DiffPane title={`${projectA} — ${fileA}`} rows={rowsA} rtl={isRTL(data.lines_a)} />
+        <DiffPane title={`${projectB} — ${fileB}`} rows={rowsB} rtl={isRTL(data.lines_b)} />
       </div>
     </div>
   );

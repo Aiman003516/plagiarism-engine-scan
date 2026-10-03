@@ -82,6 +82,29 @@ class FileExtractor:
     """Extracts text/code from files and project directories with encoding fallbacks and directory/config filtering."""
 
     @staticmethod
+    def _is_arabic_reversed(text: str) -> bool:
+        """Detect if Arabic words appear in reversed order (e.g. ending in 'لا' instead of starting with 'ال')."""
+        words = re.findall(r'[\u0600-\u06FF]+', text)
+        if not words: return False
+        al_prefix = sum(1 for w in words if w.startswith('ال'))
+        la_suffix = sum(1 for w in words if w.endswith('لا'))
+        # If 'لا' suffix is significantly more common than 'ال' prefix, it's likely reversed
+        return la_suffix > al_prefix and la_suffix >= 1
+
+    @staticmethod
+    def _fix_arabic_direction(text: str) -> str:
+        """Reverse character order in Arabic lines to fix visual RTL extraction."""
+        lines = text.split('\n')
+        fixed_lines = []
+        for line in lines:
+            if re.search(r'[\u0600-\u06FF]', line):
+                # Reverse the whole line
+                fixed_lines.append(line[::-1])
+            else:
+                fixed_lines.append(line)
+        return '\n'.join(fixed_lines)
+
+    @staticmethod
     def extract_text_from_pdf(pdf_path: Union[str, Path]) -> str:
         """Extract text from a PDF file using pypdf."""
         pdf_path = Path(pdf_path)
@@ -94,6 +117,8 @@ class FileExtractor:
             for page_num, page in enumerate(reader.pages):
                 page_text = page.extract_text()
                 if page_text:
+                    if FileExtractor._is_arabic_reversed(page_text):
+                        page_text = FileExtractor._fix_arabic_direction(page_text)
                     text_chunks.append(page_text)
         return sanitize_text("\n".join(text_chunks))
 

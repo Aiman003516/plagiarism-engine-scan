@@ -106,7 +106,15 @@ class WinnowingEngine:
         from fewer than k tokens.
         """
         from plagiarism_engine.text_detector import preprocess_text
-        tokens = preprocess_text(text).split()
+        from plagiarism_engine.arabic_preprocessor import detect_language, tokenize_arabic
+        
+        lang = detect_language(text)
+        if lang == "arabic":
+            tokens = tokenize_arabic(text)
+        elif lang == "mixed":
+            tokens = tokenize_arabic(text) + preprocess_text(text).split()
+        else:
+            tokens = preprocess_text(text).split()
 
         if len(tokens) < self.k:
             # Too few tokens for statistical k-gram hashing.
