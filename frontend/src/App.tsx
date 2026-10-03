@@ -19,7 +19,7 @@ import Sidebar from "./Sidebar";
 // --- Phase 1 pages: lazy imports ---
 // Existing pages
 const ProjectIntake = React.lazy(() =>
-  import("./pages/Plagiarism").then((module) => ({
+  import("./pages/plagiarism").then((module) => ({
     default: module.Plagiarism,
   }))
 );
