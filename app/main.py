@@ -50,6 +50,17 @@ from app.routers import (
 async def lifespan(application: FastAPI):
     thread = threading.Thread(target=_preload_models, daemon=True)
     thread.start()
+    
+    try:
+        from plagiarism_engine.vectors.hybrid_service import HybridVectorService
+        from app.state import get_vstore
+        import os
+        if os.environ.get("VECTOR_BACKEND", "hybrid") in ("hybrid", "faiss"):
+            hvs = HybridVectorService(get_vstore())
+            hvs.hydrate_faiss_from_db()
+    except Exception as e:
+        print(f"Failed to hydrate FAISS: {e}")
+        
     yield
 
 

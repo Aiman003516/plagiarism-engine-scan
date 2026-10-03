@@ -29,12 +29,15 @@ class SchemaMixin:
                     extracted_text TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE EXTENSION IF NOT EXISTS vector;
+                
                 CREATE TABLE IF NOT EXISTS project_files (
                     id VARCHAR(255) PRIMARY KEY,
                     project_id VARCHAR(255) REFERENCES projects(id) ON DELETE CASCADE,
                     relative_path TEXT NOT NULL,
                     file_type VARCHAR(50),
                     content TEXT,
+                    embedding VECTOR(768),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS scan_reports (
@@ -61,6 +64,10 @@ class SchemaMixin:
                 CREATE INDEX IF NOT EXISTS idx_project_files_project_id ON project_files(project_id);
                 CREATE INDEX IF NOT EXISTS idx_fp_hash ON fingerprint_index(fingerprint_hash);
                 CREATE INDEX IF NOT EXISTS idx_fp_project ON fingerprint_index(project_id);
+                CREATE INDEX IF NOT EXISTS idx_files_embedding
+                    ON project_files USING hnsw (embedding vector_cosine_ops)
+                    WITH (m = 16, ef_construction = 64);
+
 
                 CREATE TABLE IF NOT EXISTS users (
                     id VARCHAR(255) PRIMARY KEY,

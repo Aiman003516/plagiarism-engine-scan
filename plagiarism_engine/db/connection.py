@@ -19,14 +19,16 @@ class ConnectionMixin:
         self.pg_conn_str = pg_connection_string or os.getenv("DATABASE_URL") or DEFAULT_PG_URL
         self.sqlite_path = sqlite_db_path
         self.mode = "sqlite"
+        self.pool = None
 
         if HAS_PSYCOPG2:
             try:
                 self._ensure_pg_database_exists()
-                conn = psycopg2.connect(self.pg_conn_str)
-                conn.close()
+                from psycopg2.pool import ThreadedConnectionPool
+                self.pool = ThreadedConnectionPool(2, 10, self.pg_conn_str)
                 self.mode = "postgresql"
-            except Exception:
+            except Exception as e:
+                print(f"Failed to initialize PostgreSQL pool: {e}")
                 self.mode = "sqlite"
 
         self._init_schema()
@@ -50,7 +52,14 @@ class ConnectionMixin:
 
     def _get_connection(self):
         if self.mode == "postgresql":
-            return psycopg2.connect(self.pg_conn_str)
+            conn = self.pool.getconn()
+            # We override close so it puts the connection back to the pool instead of closing it
+            # since all methods currently do conn.close()
+            original_close = conn.close
+            def close_override():
+                self.pool.putconn(conn)
+            conn.close = close_override
+            return conn
         else:
             conn = sqlite3.connect(self.sqlite_path)
             conn.execute("PRAGMA foreign_keys = ON;")

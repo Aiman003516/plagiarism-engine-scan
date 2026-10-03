@@ -296,6 +296,17 @@ class VectorStore:
                         "file_path": file_path,
                         "domain": domain,
                     }
+                    
+                    # Hybrid: Store in PostgreSQL
+                    try:
+                        from plagiarism_engine.vectors.pgvector_store import PgVectorStore
+                        import os
+                        if os.environ.get("VECTOR_BACKEND", "hybrid") in ("hybrid", "pgvector"):
+                            file_id = f"{project_id}::{file_path}"
+                            PgVectorStore().store_embedding(file_id, embeddings[j].tolist())
+                    except Exception as e:
+                        print(f"Failed to store embedding in pgvector: {e}")
+                        
                 added += len(batch)
 
         with self._lock:
@@ -331,6 +342,16 @@ class VectorStore:
                 removed += len(ids)
 
             self._save_mapping()
+            
+            # Hybrid: Delete from PostgreSQL
+            try:
+                from plagiarism_engine.vectors.pgvector_store import PgVectorStore
+                import os
+                if os.environ.get("VECTOR_BACKEND", "hybrid") in ("hybrid", "pgvector"):
+                    PgVectorStore().delete_project_embeddings(project_id)
+            except Exception as e:
+                print(f"Failed to delete embeddings from pgvector: {e}")
+                
             return removed
 
     # ------------------------------------------------------------------
