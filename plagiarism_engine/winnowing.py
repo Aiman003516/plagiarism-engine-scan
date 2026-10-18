@@ -33,6 +33,14 @@ class WinnowingEngine:
         if not hashes:
             return []
 
+        # Documents shorter than one window (k <= tokens < k + w - 1) still get exactly one
+        # fingerprint: the minimum hash over all available k-grams. Without this, such files
+        # fell into a dead zone with ZERO fingerprints (too long for the small-file exact-match
+        # bypass, too short for a full window) and were invisible to Winnowing, even against a
+        # byte-identical copy.
+        if len(hashes) < self.w:
+            return [min(hashes, key=lambda x: (x[0], -x[1]))]
+
         # 2. Slide window of size w and pick minimum hash per window (Winnowing)
         fingerprints = []
         # Keep track of the previously selected fingerprint to avoid duplicates from overlapping windows
@@ -71,7 +79,9 @@ class WinnowingEngine:
         """
         # File is too small for statistical hashing. Hash the entire normalized
         # text as one single exact-match fingerprint.
-        normalized = ''.join(filter(str.isalnum, (text or '').lower()))
+        from plagiarism_engine.arabic_preprocessor import normalize_arabic
+        cleaned = normalize_arabic((text or '').lower())
+        normalized = ''.join(filter(str.isalnum, cleaned))
         if not normalized:
             return []
         exact_hash = int(hashlib.md5(normalized.encode('utf-8')).hexdigest(), 16) % (2**32)

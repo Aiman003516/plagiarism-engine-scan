@@ -1,36 +1,19 @@
 import React, { useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
-  Search, X, UploadCloud, FileCode2, FileText,
-  TerminalSquare, Cpu, ShieldCheck, FileArchive, Trash2,
-  FilePlus, ChevronDown, ChevronUp, HardDrive, RefreshCw
+  Search, UploadCloud, Cpu, FileArchive, Trash2,
+  FilePlus, RefreshCw
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { useScanStore, UploadedFileInfo } from "../../lib/scanStore";
 import { API_BASE_URL, plagiarismApi } from "../../lib/api";
 import { readZipScanStream, handleStreamSession } from "./hooks/useScanStream";
-
-const CODE_EXTS = new Set([
-  "py", "js", "jsx", "ts", "tsx", "java", "c", "cpp", "h", "hpp", "cs", 
-  "go", "rs", "php", "rb", "swift", "kt", "scala", "html", "css", "sql", "sh",
-  "json", "yaml", "yml", "xml", "dart", "r", "m", "vue", "svelte"
-]);
-
-const TEXT_EXTS = new Set(["pdf", "docx", "doc", "txt", "md", "tex", "rtf", "odt"]);
-const ARCHIVE_EXTS = new Set(["zip", "rar", "tar", "gz", "7z", "bz2"]);
-
-const IGNORE_PATTERNS = [
-  "node_modules", ".venv", "venv", "env", ".env", ".git", ".idea", ".vscode", 
-  "__pycache__", "dist", "build", ".next", ".nuxt", ".cache", "bin", "obj", ".nuget",
-  ".gradle", ".cargo", "site-packages", ".pytest_cache", ".mypy_cache", "vendor"
-];
-
-const BINARY_EXTS = new Set([
-  "exe", "dll", "so", "dylib", "class", "pyc", "pyo", "pyd", "o", "a", "iso", "dmg", 
-  "wasm", "bin", "pt", "pth", "h5", "hdf5", "onnx", "pkl", "pickle", "joblib",
-  "mp4", "avi", "mov", "mkv", "mp3", "wav", "png", "jpg", "jpeg", "gif", "ico"
-]);
+import {
+  CODE_EXTS, TEXT_EXTS, ARCHIVE_EXTS, IGNORE_PATTERNS,
+  BINARY_EXTS, formatFileSize, traverseDirectoryEntry
+} from "./fileConstants";
+import { StagedFilesExplorer } from "./StagedFilesExplorer";
 
 export function UploadSection() {
   const { t } = useTranslation();
@@ -47,21 +30,11 @@ export function UploadSection() {
   const processedFilesCount = useScanStore((s) => s.processedFilesCount);
   const processingPhase = useScanStore((s) => s.processingPhase);
   const isScanning = useScanStore((s) => s.isScanning);
-  
   const bloatFilteredCount = useScanStore((s) => s.bloatFilteredCount);
-  const inspectedTotalNodes = useScanStore((s) => s.inspectedTotalNodes);
 
   const [showExplorer, setShowExplorer] = useState(false);
   const [stagedSearch, setStagedSearch] = useState("");
   const [stagedCategory, setStagedCategory] = useState<"all" | "code" | "text" | "archive">("all");
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-  };
 
   const processRawFiles = async (files: File[], customPaths?: string[]) => {
     useScanStore.getState().setProcessingState({
@@ -70,12 +43,12 @@ export function UploadSection() {
       processed: 0,
       phase: `Reading file content (0/${files.length.toLocaleString()})...`,
     });
-    
+
     const newItems: UploadedFileInfo[] = [];
     let detectedProjectName = "";
     let localBloatCount = 0;
     let localInspectedCount = 0;
-    
+
     const startTime = Date.now();
     const CHUNK_SIZE = 500;
 
@@ -96,7 +69,7 @@ export function UploadSection() {
           }
         }
 
-        const isIgnored = IGNORE_PATTERNS.some(p => 
+        const isIgnored = IGNORE_PATTERNS.some(p =>
           pathLower.includes(`/${p}/`) || pathLower.startsWith(`${p}/`) || pathLower.includes(`\\${p}\\`)
         );
         if (isIgnored) {
@@ -111,7 +84,6 @@ export function UploadSection() {
         }
 
         let fileType: "code" | "text" | "archive" | "other" = "other";
-
         if (CODE_EXTS.has(ext)) {
           fileType = "code";
         } else if (TEXT_EXTS.has(ext)) {
@@ -124,7 +96,7 @@ export function UploadSection() {
         if ((fileType === "code" || fileType === "text") && file.size < 10 * 1024 * 1024) {
           try {
             contentText = await file.text();
-          } catch (e) {
+          } catch {
             // Binary fallback
           }
         }
@@ -170,38 +142,6 @@ export function UploadSection() {
     }
   };
 
-  const traverseDirectoryEntry = async (entry: any, path = ""): Promise<{ file: File; path: string }[]> => {
-    return new Promise((resolve) => {
-      if (entry.isFile) {
-        entry.file((file: File) => {
-          resolve([{ file, path: path ? `${path}/${file.name}` : file.name }]);
-        }, () => resolve([]));
-      } else if (entry.isDirectory) {
-        const dirReader = entry.createReader();
-        const entries: any[] = [];
-        const readEntries = () => {
-          dirReader.readEntries(async (result: any[]) => {
-            if (result.length === 0) {
-              const nestedFiles: { file: File; path: string }[] = [];
-              for (const childEntry of entries) {
-                const childPath = path ? `${path}/${entry.name}` : entry.name;
-                const childFiles = await traverseDirectoryEntry(childEntry, childPath);
-                nestedFiles.push(...childFiles);
-              }
-              resolve(nestedFiles);
-            } else {
-              entries.push(...result);
-              readEntries();
-            }
-          }, () => resolve([]));
-        };
-        readEntries();
-      } else {
-        resolve([]);
-      }
-    });
-  };
-
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       processRawFiles(Array.from(e.target.files));
@@ -219,7 +159,7 @@ export function UploadSection() {
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
-    useScanStore.getState().setProcessingState({ isTraversing: true, phase: 'Scanning directory structure...' });
+    useScanStore.getState().setProcessingState({ isTraversing: true, phase: "Scanning directory structure..." });
 
     const items = e.dataTransfer.items;
     if (items && items.length > 0) {
@@ -240,7 +180,7 @@ export function UploadSection() {
         const flattened = results.flat();
         const files = flattened.map(f => f.file);
         const paths = flattened.map(f => f.path);
-        
+
         useScanStore.getState().setProcessingState({ isTraversing: false });
 
         if (files.length > 0) {
@@ -253,7 +193,7 @@ export function UploadSection() {
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       processRawFiles(Array.from(e.dataTransfer.files));
     }
-    
+
     useScanStore.getState().setProcessingState({ isTraversing: false });
   };
 
@@ -294,7 +234,7 @@ export function UploadSection() {
     const isZipFlow = uploadedFiles.length === 1 && archives.length === 1;
 
     if (archives.length > 0 && !isZipFlow) {
-      toast.success(t("nested_archives_ignored", "Nested archives detected and ignored. Scanning source files."), { icon: 'ℹ️' });
+      toast.success(t("nested_archives_ignored", "Nested archives detected and ignored. Scanning source files."), { icon: "ℹ️" });
     } else if (archives.length > 0 && isZipFlow) {
       if (!archives[0].name.toLowerCase().endsWith(".zip")) {
         toast.error(t("only_zip_supported", "Only .zip archives are supported."));
@@ -387,44 +327,32 @@ export function UploadSection() {
   };
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       className="space-y-4"
     >
       {/* Hidden file inputs */}
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileSelect} 
-        multiple 
-        className="hidden" 
-      />
-      <input 
-        type="file" 
-        ref={zipInputRef} 
-        onChange={handleZipSelect} 
-        accept=".zip" 
-        className="hidden" 
-      />
-      <input 
-        type="file" 
-        ref={folderInputRef} 
-        onChange={handleFileSelect} 
+      <input type="file" ref={fileInputRef} onChange={handleFileSelect} multiple className="hidden" />
+      <input type="file" ref={zipInputRef} onChange={handleZipSelect} accept=".zip" className="hidden" />
+      <input
+        type="file"
+        ref={folderInputRef}
+        onChange={handleFileSelect}
         // @ts-ignore - webkitdirectory is non-standard but supported
         webkitdirectory=""
         directory=""
-        className="hidden" 
+        className="hidden"
       />
 
       <div className="glass-card !p-6 relative overflow-hidden">
-        <div 
+        <div
           className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center p-10 transition-all duration-300 cursor-pointer ${
-            isDragging 
-              ? 'border-accent bg-accent/10 scale-[1.01] shadow-[0_0_30px_rgba(249,115,22,0.2)]' 
+            isDragging
+              ? "border-accent bg-accent/10 scale-[1.01] shadow-[0_0_30px_rgba(249,115,22,0.2)]"
               : (isProcessingFiles || isTraversing)
-              ? 'border-accent/50 bg-accent/5'
-              : 'border-glass-border bg-surface/20 hover:border-accent/60 hover:bg-surface/30'
+              ? "border-accent/50 bg-accent/5"
+              : "border-glass-border bg-surface/20 hover:border-accent/60 hover:bg-surface/30"
           }`}
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
@@ -439,7 +367,7 @@ export function UploadSection() {
               <h2 className="text-xl font-bold text-text-main text-center mb-2">
                 {processingPhase || t("processing_files", "Processing files...")}
               </h2>
-              
+
               {totalFilesToProcess > 0 && (
                 <div className="w-full mt-4 space-y-2">
                   <div className="flex justify-between text-xs font-mono text-text-muted">
@@ -447,8 +375,8 @@ export function UploadSection() {
                     <span>{Math.round((processedFilesCount / totalFilesToProcess) * 100)}%</span>
                   </div>
                   <div className="h-2.5 w-full bg-text-muted/15 dark:bg-slate-800 rounded-full overflow-hidden border border-glass-border dark:border-slate-700">
-                    <div 
-                      className="h-full bg-gradient-to-r from-accent to-primary-hover rounded-full shadow-[0_0_10px_rgba(255,214,102,0.55)] transition-all duration-300 ease-out" 
+                    <div
+                      className="h-full bg-gradient-to-r from-accent to-primary-hover rounded-full shadow-[0_0_10px_rgba(255,214,102,0.55)] transition-all duration-300 ease-out"
                       style={{ width: `${(processedFilesCount / totalFilesToProcess) * 100}%` }}
                     ></div>
                   </div>
@@ -458,9 +386,9 @@ export function UploadSection() {
           ) : (
             <>
               <div className="w-20 h-20 rounded-3xl bg-surface border border-glass-border flex items-center justify-center mb-4 shadow-2xl group">
-                <UploadCloud className={`w-10 h-10 transition-transform group-hover:scale-110 ${isDragging ? 'text-primary dark:text-accent' : 'text-text-muted'}`} />
+                <UploadCloud className={`w-10 h-10 transition-transform group-hover:scale-110 ${isDragging ? "text-primary dark:text-accent" : "text-text-muted"}`} />
               </div>
-              
+
               <h2 className="text-xl font-bold text-text-main text-center">
                 {t("unified_upload_title")}
               </h2>
@@ -469,20 +397,20 @@ export function UploadSection() {
               </p>
 
               <div className="w-full max-w-sm mb-4" onClick={(e) => e.stopPropagation()}>
-                <input 
-                  type="text" 
-                  placeholder="Project Name (e.g., Spring2026_Final)" 
+                <input
+                  type="text"
+                  placeholder="Project Name (e.g., Spring2026_Final)"
                   className="w-full bg-surface border border-glass-border rounded-xl px-4 py-2.5 text-sm text-text-main focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all placeholder:text-text-muted/50"
                   value={projectName}
                   onChange={(e) => useScanStore.getState().setProjectName(e.target.value)}
                 />
               </div>
 
-              <div 
+              <div
                 className="flex flex-wrap items-center justify-center gap-3 z-10"
                 onClick={(e) => e.stopPropagation()}
               >
-                <button 
+                <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isProcessingFiles}
                   className="bg-surface hover:bg-surface-hover border border-glass-border text-text-main font-semibold px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs transition-all shadow-sm active:scale-95"
@@ -491,7 +419,7 @@ export function UploadSection() {
                   {t("browse_files")}
                 </button>
 
-                <button 
+                <button
                   onClick={() => folderInputRef.current?.click()}
                   disabled={isProcessingFiles}
                   className="bg-surface hover:bg-surface-hover border border-glass-border text-text-main font-semibold px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs transition-all shadow-sm active:scale-95"
@@ -500,7 +428,7 @@ export function UploadSection() {
                   {t("browse_folders")}
                 </button>
 
-                <button 
+                <button
                   onClick={() => zipInputRef.current?.click()}
                   disabled={isProcessingFiles}
                   className="bg-surface hover:bg-surface-hover border border-glass-border text-text-main font-semibold px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs transition-all shadow-sm active:scale-95"
@@ -513,144 +441,23 @@ export function UploadSection() {
           )}
         </div>
 
-        {(uploadedFiles.length > 0 || bloatFilteredCount > 0) && (
-          <div className="mt-5 pt-5 border-t border-glass-border/40 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <span className="text-xs font-semibold text-text-muted flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
-                  {t("intake_progress_title")}:
-                </span>
-
-                {bloatFilteredCount > 0 && (
-                  <span className="px-2.5 py-1 rounded-full bg-text-muted/10 border border-text-muted/20 text-text-muted text-xs font-medium">
-                    🛡️ {bloatFilteredCount} {t("intake_bloat_eliminated")}
-                  </span>
-                )}
-
-                <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
-                  ⚡ {uploadedFiles.length} {t("intake_core_staged")}
-                </span>
-
-                <span className="px-2.5 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-medium">
-                  📏 {formatFileSize(totalStagedSize)} <span className="opacity-70 font-normal ml-1">(uploaded archives)</span>
-                </span>
-              </div>
-
-              <button 
-                onClick={() => setShowExplorer(!showExplorer)}
-                className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-surface border border-glass-border hover:bg-surface-hover text-text-main text-xs font-medium transition-colors"
-              >
-                <HardDrive className="w-3.5 h-3.5 text-primary dark:text-accent" />
-                {t("staged_files_header")} ({uploadedFiles.length})
-                {showExplorer ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-              </button>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary text-xs">
-                <FileCode2 className="w-3.5 h-3.5" />
-                {stagedCodeCount} {t("code_files")}
-              </div>
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs">
-                <FileText className="w-3.5 h-3.5" />
-                {stagedDocCount} {t("doc_files")}
-              </div>
-              {stagedArchiveCount > 0 && (
-                <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-accent/10 border border-accent/20 text-accent-text text-xs">
-                  <FileArchive className="w-3.5 h-3.5" />
-                  {stagedArchiveCount} {t("archive_files")}
-                </div>
-              )}
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs">
-                <TerminalSquare className="w-3.5 h-3.5" />
-                {stagedLoc.toLocaleString()} {t("loc_staged_metric")}
-              </div>
-            </div>
-          </div>
-        )}
-
-        <AnimatePresence>
-          {showExplorer && uploadedFiles.length > 0 && (
-            <motion.div 
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-5 pt-5 border-t border-glass-border/40 overflow-hidden"
-            >
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-3">
-                <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-                  <button 
-                    onClick={() => setStagedCategory("all")}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${stagedCategory === "all" ? "bg-accent text-accent-text" : "bg-surface text-text-muted hover:text-text-main"}`}
-                  >
-                    {t("all_files")} ({uploadedFiles.length})
-                  </button>
-                  <button 
-                    onClick={() => setStagedCategory("code")}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${stagedCategory === "code" ? "bg-primary text-primary-text" : "bg-surface text-text-muted hover:text-text-main"}`}
-                  >
-                    {t("code_files")} ({stagedCodeCount})
-                  </button>
-                  <button 
-                    onClick={() => setStagedCategory("text")}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${stagedCategory === "text" ? "bg-amber-600 text-white" : "bg-surface text-text-muted hover:text-text-main"}`}
-                  >
-                    {t("doc_files")} ({stagedDocCount})
-                  </button>
-                  {stagedArchiveCount > 0 && (
-                    <button 
-                      onClick={() => setStagedCategory("archive")}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${stagedCategory === "archive" ? "bg-accent text-accent-text" : "bg-surface text-text-muted hover:text-text-main"}`}
-                    >
-                      {t("archive_files")} ({stagedArchiveCount})
-                    </button>
-                  )}
-                </div>
-
-                <div className="relative w-full sm:w-72">
-                  <Search className="absolute left-3 rtl:right-3 rtl:left-auto top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
-                  <input 
-                    type="text"
-                    placeholder={t("search_staged_files")}
-                    value={stagedSearch}
-                    onChange={(e) => setStagedSearch(e.target.value)}
-                    className="w-full bg-surface/50 border border-glass-border rounded-lg pl-9 pr-3 rtl:pr-9 rtl:pl-3 py-1.5 text-xs text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  />
-                </div>
-              </div>
-
-              <div className="max-h-56 overflow-y-auto rounded-xl border border-glass-border divide-y divide-glass-border/40 bg-surface/20">
-                {filteredStagedFiles.map((file) => (
-                  <div key={file.id} className="p-2.5 px-4 flex items-center justify-between hover:bg-surface/40 transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                      {file.type === "code" && <FileCode2 className="w-4 h-4 text-primary shrink-0" />}
-                      {file.type === "text" && <FileText className="w-4 h-4 text-amber-400 shrink-0" />}
-                      {file.type === "archive" && <FileArchive className="w-4 h-4 text-accent-text shrink-0" />}
-                      {file.type === "other" && <FilePlus className="w-4 h-4 text-text-muted shrink-0" />}
-                      <span className="text-xs font-mono text-text-main truncate">{file.path}</span>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className="text-[11px] text-text-muted font-mono">{formatFileSize(file.size)}</span>
-                      <button 
-                        onClick={() => removeStagedFile(file.id)}
-                        className="text-text-muted hover:text-red-500 dark:hover:text-red-400 p-1 rounded transition-colors"
-                        title={t("remove_file")}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {filteredStagedFiles.length === 0 && (
-                  <div className="p-6 text-center text-xs text-text-muted">
-                    {t("no_files_staged")}
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <StagedFilesExplorer
+          uploadedFiles={uploadedFiles}
+          bloatFilteredCount={bloatFilteredCount}
+          totalStagedSize={totalStagedSize}
+          stagedCodeCount={stagedCodeCount}
+          stagedDocCount={stagedDocCount}
+          stagedArchiveCount={stagedArchiveCount}
+          stagedLoc={stagedLoc}
+          showExplorer={showExplorer}
+          setShowExplorer={setShowExplorer}
+          stagedCategory={stagedCategory}
+          setStagedCategory={setStagedCategory}
+          stagedSearch={stagedSearch}
+          setStagedSearch={setStagedSearch}
+          filteredStagedFiles={filteredStagedFiles}
+          removeStagedFile={removeStagedFile}
+        />
       </div>
 
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 glass-card !p-5">
@@ -675,7 +482,7 @@ export function UploadSection() {
             </button>
           )}
 
-          <button 
+          <button
             onClick={startDirectScan}
             disabled={isScanning || isProcessingFiles || isTraversing || uploadedFiles.length === 0}
             className="w-full sm:w-auto bg-primary hover:bg-primary-hover text-primary-text font-bold text-base rounded-xl px-8 py-3.5 shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"

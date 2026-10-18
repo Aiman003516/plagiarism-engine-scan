@@ -93,13 +93,16 @@ class FileExtractor:
 
     @staticmethod
     def _fix_arabic_direction(text: str) -> str:
-        """Reverse character order in Arabic lines to fix visual RTL extraction."""
+        """Reverse character order in Arabic lines to fix visual RTL extraction while preserving LTR Latin/numeric tokens."""
         lines = text.split('\n')
         fixed_lines = []
         for line in lines:
             if re.search(r'[\u0600-\u06FF]', line):
-                # Reverse the whole line
-                fixed_lines.append(line[::-1])
+                # Reverse the whole visual line so RTL words and characters are restored to logical order,
+                # then flip back any embedded LTR Latin/number tokens so e.g. 'nohtyP' stays 'Python'.
+                rev_line = line[::-1]
+                rev_line = re.sub(r'[a-zA-Z0-9_.\-]+', lambda m: m.group(0)[::-1], rev_line)
+                fixed_lines.append(rev_line)
             else:
                 fixed_lines.append(line)
         return '\n'.join(fixed_lines)

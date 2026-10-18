@@ -1,0 +1,61 @@
+
+> plagiarism-engine-standalone@1.0.0 build
+> vite build
+
+[36mvite v6.4.3 [32mbuilding for production...[36m[39m
+transforming...
+[32m✓[39m 2152 modules transformed.
+rendering chunks...
+computing gzip size...
+[2mdist/[22m[32mindex.html                                                     [39m[1m[2m  0.43 kB[22m[1m[22m[2m │ gzip:   0.28 kB[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-vietnamese-400-normal-Cg2kxhWu.woff2  [39m[1m[2m  4.10 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-vietnamese-600-normal-Y4VTTRme.woff2  [39m[1m[2m  4.20 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-vietnamese-700-normal-CV6qDkkj.woff2  [39m[1m[2m  4.27 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-vietnamese-500-normal-DiU8zqi-.woff2  [39m[1m[2m  4.28 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-vietnamese-400-normal-B8TCSmUq.woff   [39m[1m[2m  5.60 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-vietnamese-600-normal-5YsyKbU1.woff   [39m[1m[2m  5.74 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-vietnamese-700-normal-BCh_uG_5.woff   [39m[1m[2m  5.78 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-vietnamese-500-normal-CvE5C8T-.woff   [39m[1m[2m  5.79 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-ext-400-normal-D127hM_v.woff2   [39m[1m[2m 10.59 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-ext-500-normal-9VZagAe1.woff2   [39m[1m[2m 10.86 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-ext-600-normal-DQgPU_Cg.woff2   [39m[1m[2m 10.90 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-ext-700-normal-BajbvANd.woff2   [39m[1m[2m 11.01 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-400-normal-Dhut76fR.woff2       [39m[1m[2m 11.82 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-600-normal-DLTa1BUW.woff2       [39m[1m[2m 12.19 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-700-normal-CfpNZvy6.woff2       [39m[1m[2m 12.24 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-500-normal-Bf-nb4oT.woff2       [39m[1m[2m 12.31 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-ext-400-normal-2ppkqaOR.woff    [39m[1m[2m 15.31 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-ext-600-normal-B0WRRYJ1.woff    [39m[1m[2m 15.61 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-ext-700-normal-8-d-IyIQ.woff    [39m[1m[2m 15.62 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-ext-500-normal-CqEEAICU.woff    [39m[1m[2m 15.62 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-400-normal-BDKaGhyp.woff        [39m[1m[2m 15.73 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-600-normal-BR_Ojra4.woff        [39m[1m[2m 16.08 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-500-normal-DYtqi0QS.woff        [39m[1m[2m 16.12 kB[22m[1m[22m
+[2mdist/[22m[32massets/plus-jakarta-sans-latin-700-normal-DqEcQeE5.woff        [39m[1m[2m 16.14 kB[22m[1m[22m
+[2mdist/[22m[35massets/index-BoNyTPrF.css                                      [39m[1m[2m 90.26 kB[22m[1m[22m[2m │ gzip:  21.21 kB[22m
+[2mdist/[22m[36massets/react-C-eIwcKn.js                                       [39m[1m[2m  0.07 kB[22m[1m[22m[2m │ gzip:   0.08 kB[22m
+[2mdist/[22m[36massets/loader-circle-K9YaYflf.js                               [39m[1m[2m  0.31 kB[22m[1m[22m[2m │ gzip:   0.26 kB[22m
+[2mdist/[22m[36massets/plus-CVTh9si4.js                                        [39m[1m[2m  0.33 kB[22m[1m[22m[2m │ gzip:   0.25 kB[22m
+[2mdist/[22m[36massets/x-COKNc07U.js                                           [39m[1m[2m  0.33 kB[22m[1m[22m[2m │ gzip:   0.26 kB[22m
+[2mdist/[22m[36massets/lock-DU9nmUsv.js                                        [39m[1m[2m  0.37 kB[22m[1m[22m[2m │ gzip:   0.29 kB[22m
+[2mdist/[22m[36massets/globe-C6Z7LUDB.js                                       [39m[1m[2m  0.41 kB[22m[1m[22m[2m │ gzip:   0.30 kB[22m
+[2mdist/[22m[36massets/chart-column-DFwafe15.js                                [39m[1m[2m  0.42 kB[22m[1m[22m[2m │ gzip:   0.30 kB[22m
+[2mdist/[22m[36massets/shield-check-CdunVh7u.js                                [39m[1m[2m  0.49 kB[22m[1m[22m[2m │ gzip:   0.35 kB[22m
+[2mdist/[22m[36massets/trash-2-cpylQy2j.js                                     [39m[1m[2m  0.50 kB[22m[1m[22m[2m │ gzip:   0.32 kB[22m
+[2mdist/[22m[36massets/file-text-DrHAF2Lc.js                                   [39m[1m[2m  0.51 kB[22m[1m[22m[2m │ gzip:   0.32 kB[22m
+[2mdist/[22m[36massets/NotFound-C8E8P9uW.js                                    [39m[1m[2m  1.10 kB[22m[1m[22m[2m │ gzip:   0.60 kB[22m
+[2mdist/[22m[36massets/file-code-2-D-XkM_V_.js                                 [39m[1m[2m  1.14 kB[22m[1m[22m[2m │ gzip:   0.46 kB[22m
+[2mdist/[22m[36massets/Login-BB79Co80.js                                       [39m[1m[2m  2.91 kB[22m[1m[22m[2m │ gzip:   1.31 kB[22m
+[2mdist/[22m[36massets/ForceChangePassword-BqT6ct8O.js                         [39m[1m[2m  3.41 kB[22m[1m[22m[2m │ gzip:   1.24 kB[22m
+[2mdist/[22m[36massets/Settings-CJaAoawx.js                                    [39m[1m[2m  4.16 kB[22m[1m[22m[2m │ gzip:   1.46 kB[22m
+[2mdist/[22m[36massets/useTranslation-CEbET8wK.js                              [39m[1m[2m  5.63 kB[22m[1m[22m[2m │ gzip:   2.66 kB[22m
+[2mdist/[22m[36massets/Teams-Dly9kv2v.js                                       [39m[1m[2m  6.68 kB[22m[1m[22m[2m │ gzip:   1.98 kB[22m
+[2mdist/[22m[36massets/Users-CZUDNzRE.js                                       [39m[1m[2m  7.13 kB[22m[1m[22m[2m │ gzip:   2.20 kB[22m
+[2mdist/[22m[36massets/api-31lEhOYd.js                                         [39m[1m[2m  8.17 kB[22m[1m[22m[2m │ gzip:   2.74 kB[22m
+[2mdist/[22m[36massets/Projects-BuuS82QQ.js                                    [39m[1m[2m  8.47 kB[22m[1m[22m[2m │ gzip:   2.65 kB[22m
+[2mdist/[22m[36massets/PlagiarismAnalysis-CAp33BlJ.js                          [39m[1m[2m 25.24 kB[22m[1m[22m[2m │ gzip:   6.29 kB[22m
+[2mdist/[22m[36massets/Dashboard-CIt_rlx9.js                                   [39m[1m[2m 36.01 kB[22m[1m[22m[2m │ gzip:  11.25 kB[22m
+[2mdist/[22m[36massets/index-Dh_G62qZ.js                                       [39m[1m[2m 55.13 kB[22m[1m[22m[2m │ gzip:  15.83 kB[22m
+[2mdist/[22m[36massets/proxy-Bi1OPnZU.js                                       [39m[1m[2m124.82 kB[22m[1m[22m[2m │ gzip:  40.80 kB[22m
+[2mdist/[22m[36massets/index-O7_r8Wze.js                                       [39m[1m[2m378.23 kB[22m[1m[22m[2m │ gzip: 121.12 kB[22m
+[32m✓ built in 37.71s[39m

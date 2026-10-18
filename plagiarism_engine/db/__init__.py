@@ -43,8 +43,32 @@ class SystemDBStore(
     """
 
 
+class _LazyDBStoreProxy:
+    """Lazy proxy that resolves to app.state.get_db() or a default SystemDBStore singleton."""
+
+    _fallback_instance = None
+
+    def _resolve(self) -> SystemDBStore:
+        try:
+            from app import state as app_state
+            if app_state._db is not None:
+                return app_state._db
+            return app_state.get_db()
+        except Exception:
+            if self._fallback_instance is None:
+                self._fallback_instance = SystemDBStore()
+            return self._fallback_instance
+
+    def __getattr__(self, name):
+        return getattr(self._resolve(), name)
+
+
+store = _LazyDBStoreProxy()
+
+
 __all__ = [
     "SystemDBStore",
+    "store",
     "HAS_PSYCOPG2",
     "DEFAULT_PG_URL",
     "clean_str",
@@ -53,3 +77,4 @@ __all__ = [
     "_as_bool_flag",
     "row_get",
 ]
+

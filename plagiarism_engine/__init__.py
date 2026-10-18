@@ -1,3 +1,6 @@
+from .config import load_project_env
+load_project_env()
+
 from .extractor import FileExtractor
 from .code_detector import CodePlagiarismDetector
 from .text_detector import TextPlagiarismDetector, normalize_arabic_text

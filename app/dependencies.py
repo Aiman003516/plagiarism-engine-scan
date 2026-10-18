@@ -7,12 +7,21 @@ from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 
 
+from plagiarism_engine.config import load_project_env
+
+load_project_env()
+
 # ============================================================================
 # AUTHENTICATION & RBAC (JWT)
 # ============================================================================
 
 JWT_SECRET = os.environ.get("JWT_SECRET")
 if not JWT_SECRET:
+    if os.environ.get("APP_ENV", "").strip().lower() == "production":
+        raise RuntimeError(
+            "JWT_SECRET must be set when APP_ENV=production. "
+            "Add a long random JWT_SECRET to the environment or .env file."
+        )
     import secrets as _secrets
     JWT_SECRET = _secrets.token_hex(32)
     import warnings

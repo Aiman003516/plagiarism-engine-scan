@@ -31,7 +31,10 @@ class ProjectsStoreMixin:
             conn.close()
 
     def save_project(self, project_id: str, project_name: str, files: List[Dict[str, Any]]) -> None:
-        """Save a project folder and its core files to PostgreSQL or SQLite using bulk batch inserts."""
+        """Save a project folder and its core files using StorageService and Postgres metadata."""
+        from plagiarism_engine.storage import get_storage_service
+        storage = get_storage_service()
+
         conn = self._get_connection()
         try:
             cur = conn.cursor()
@@ -42,8 +45,15 @@ class ProjectsStoreMixin:
                 rel_path = clean_str(f.get('relative_path', f.get('filename', '')))
                 file_id = clean_str(f"{pid}::{rel_path}")
                 f_type = clean_str(f.get('file_type', ''))
-                f_content = compress_text(clean_str(f.get('content', '')))
-                file_rows.append((file_id, pid, rel_path, f_type, f_content))
+                f_content = clean_str(f.get('content', ''))
+                
+                # Save actual content to Cloud/Local Storage
+                storage_path = f"{pid}/{rel_path}"
+                storage.save_file(storage_path, f_content.encode('utf-8'))
+                
+                # We store empty content in DB to save space, rely on StorageService
+                empty_content = compress_text("")
+                file_rows.append((file_id, pid, rel_path, f_type, empty_content))
 
             if self.mode == "postgresql":
                 cur.execute("INSERT INTO projects (id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING;", (pid, pname))
@@ -51,7 +61,7 @@ class ProjectsStoreMixin:
                     cur.executemany("""
                         INSERT INTO project_files (id, project_id, relative_path, file_type, content)
                         VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO UPDATE SET content=EXCLUDED.content;
+                        ON CONFLICT (id) DO UPDATE SET file_type=EXCLUDED.file_type;
                     """, file_rows)
             else:
                 cur.execute("INSERT OR REPLACE INTO projects (id, name) VALUES (?, ?);", (pid, pname))
@@ -202,7 +212,10 @@ class ProjectsStoreMixin:
             conn.close()
 
     def delete_project(self, project_id: str) -> None:
-        """Delete a project and cascade to its files and fingerprints."""
+        """Delete a project and cascade to its files and fingerprints. Also deletes files from StorageService."""
+        from plagiarism_engine.storage import get_storage_service
+        storage = get_storage_service()
+
         conn = self._get_connection()
         try:
             cur = conn.cursor()
@@ -215,12 +228,22 @@ class ProjectsStoreMixin:
                 cur.execute("DELETE FROM fingerprint_index WHERE project_id = ?;", (pid,))
                 cur.execute("DELETE FROM project_files WHERE project_id = ?;", (pid,))
                 cur.execute("DELETE FROM projects WHERE id = ?;", (pid,))
+            
+            # Delete physical files from Cloud/Local Storage
+            try:
+                storage.delete_directory(pid)
+            except Exception as e:
+                print(f"Warning: Failed to delete storage directory for {pid}: {e}")
+                
             conn.commit()
         finally:
             conn.close()
 
     def get_project_files(self, project_id: str) -> List[Dict[str, Any]]:
-        """Retrieve all files for a given project, decompressing the content."""
+        """Retrieve all files for a given project, fetching content from StorageService with DB fallback."""
+        from plagiarism_engine.storage import get_storage_service
+        storage = get_storage_service()
+
         conn = self._get_connection()
         try:
             cur = conn.cursor()
@@ -235,28 +258,50 @@ class ProjectsStoreMixin:
             files = []
             for r in rows:
                 if isinstance(r, dict) or hasattr(r, 'keys'):
-                    files.append({
-                        "project_id": r['project_id'],
-                        "relative_path": r['relative_path'],
-                        "file_type": r['file_type'],
-                        "content": decompress_text(r['content'])
-                    })
+                    pid = r['project_id']
+                    rel_path = r['relative_path']
+                    ftype = r['file_type']
+                    raw_db_content = r.get('content', '') if isinstance(r, dict) else r['content']
                 else:
-                    files.append({
-                        "project_id": r[0],
-                        "relative_path": r[1],
-                        "file_type": r[2],
-                        "content": decompress_text(r[3])
-                    })
+                    pid = r[0]
+                    rel_path = r[1]
+                    ftype = r[2]
+                    raw_db_content = r[3] if len(r) > 3 else ''
+                
+                storage_path = f"{pid}/{rel_path}"
+                content = ""
+                try:
+                    content = storage.read_file(storage_path).decode('utf-8', errors='replace')
+                except Exception:
+                    if raw_db_content:
+                        try:
+                            content = decompress_text(raw_db_content)
+                        except Exception:
+                            content = ""
+
+                files.append({
+                    "project_id": pid,
+                    "relative_path": rel_path,
+                    "file_type": ftype,
+                    "content": content
+                })
             return files
         finally:
             conn.close()
 
-    def get_files_by_paths(self, project_id: str, relative_paths: List[str]) -> List[Dict[str, Any]]:
-        """Retrieve specific files from another project, decompressing their content."""
+    def get_files_by_paths(
+        self,
+        project_id: str,
+        relative_paths: List[str],
+        target_project_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve specific files from another project, fetching content from StorageService with DB fallback."""
         if not relative_paths:
             return []
             
+        from plagiarism_engine.storage import get_storage_service
+        storage = get_storage_service()
+
         conn = self._get_connection()
         try:
             cur = conn.cursor()
@@ -269,12 +314,20 @@ class ProjectsStoreMixin:
 
                 if self.mode == "postgresql":
                     placeholders = ','.join(['%s'] * len(chunk))
-                    query = f"SELECT project_id, relative_path, file_type, content FROM project_files WHERE relative_path IN ({placeholders}) AND project_id != %s"
-                    params = tuple(chunk) + (project_id,)
+                    if target_project_id:
+                        query = f"SELECT project_id, relative_path, file_type, content FROM project_files WHERE relative_path IN ({placeholders}) AND project_id = %s"
+                        params = tuple(chunk) + (target_project_id,)
+                    else:
+                        query = f"SELECT project_id, relative_path, file_type, content FROM project_files WHERE relative_path IN ({placeholders}) AND project_id != %s"
+                        params = tuple(chunk) + (project_id,)
                 else:
                     placeholders = ','.join(['?'] * len(chunk))
-                    query = f"SELECT project_id, relative_path, file_type, content FROM project_files WHERE relative_path IN ({placeholders}) AND project_id != ?"
-                    params = tuple(chunk) + (project_id,)
+                    if target_project_id:
+                        query = f"SELECT project_id, relative_path, file_type, content FROM project_files WHERE relative_path IN ({placeholders}) AND project_id = ?"
+                        params = tuple(chunk) + (target_project_id,)
+                    else:
+                        query = f"SELECT project_id, relative_path, file_type, content FROM project_files WHERE relative_path IN ({placeholders}) AND project_id != ?"
+                        params = tuple(chunk) + (project_id,)
 
                 cur.execute(query, params)
                 rows = cur.fetchall()
@@ -282,19 +335,33 @@ class ProjectsStoreMixin:
                 for r in rows:
                     if isinstance(r, dict) or hasattr(r, 'keys'):
                         row_keys = r.keys()
-                        files.append({
-                            "project_id": r['project_id'],
-                            "relative_path": r['relative_path'],
-                            "file_type": r['file_type'] if 'file_type' in row_keys else '',
-                            "content": decompress_text(r['content'])
-                        })
+                        pid = r['project_id']
+                        rel_path = r['relative_path']
+                        ftype = r['file_type'] if 'file_type' in row_keys else ''
+                        raw_db_content = r['content'] if 'content' in row_keys else ''
                     else:
-                        files.append({
-                            "project_id": r[0],
-                            "relative_path": r[1],
-                            "file_type": r[2] if len(r) > 2 else '',
-                            "content": decompress_text(r[3])
-                        })
+                        pid = r[0]
+                        rel_path = r[1]
+                        ftype = r[2] if len(r) > 2 else ''
+                        raw_db_content = r[3] if len(r) > 3 else ''
+                    
+                    storage_path = f"{pid}/{rel_path}"
+                    content = ""
+                    try:
+                        content = storage.read_file(storage_path).decode('utf-8', errors='replace')
+                    except Exception:
+                        if raw_db_content:
+                            try:
+                                content = decompress_text(raw_db_content)
+                            except Exception:
+                                content = ""
+
+                    files.append({
+                        "project_id": pid,
+                        "relative_path": rel_path,
+                        "file_type": ftype,
+                        "content": content
+                    })
             return files
         finally:
             conn.close()

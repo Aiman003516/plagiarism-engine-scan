@@ -89,7 +89,7 @@ async def delete_project(project_id: str):
         raise HTTPException(status_code=404, detail="Project not found")
     db.delete_project(project_id)
 
-    # Clean up the project's embeddings from the FAISS vector store as well.
+    # Clean up the project's embeddings from the Postgres vector store as well.
     # Runs in an executor so index I/O never blocks the event loop; a failure
     # here must not fail the (already completed) DB deletion.
     try:
@@ -98,7 +98,7 @@ async def delete_project(project_id: str):
             None, lambda: vstore.delete_project(project_id)
         )
     except Exception as e:
-        print(f"FAISS cleanup warning for project '{project_id}': {e}")
+        print(f"Postgres vector cleanup warning for project '{project_id}': {e}")
 
     return {"detail": "Project deleted"}
 
@@ -114,7 +114,7 @@ async def list_project_files(project_id: str):
 
 @router.post("/api/plagiarism/projects/{project_id}/index-embeddings")
 async def index_project_embeddings(project_id: str, user=Depends(require_role("ministry_admin", "college_admin", "faculty"))):
-    """On-demand Deep Scan indexer: generate a project's embeddings and add them to FAISS.
+    """On-demand Deep Scan indexer: generate a project's embeddings and store them in PostgreSQL.
 
     Uploads no longer build the vector index (see ``_run_intake``), so this
     endpoint populates it explicitly. Safe to call repeatedly — stale vectors
@@ -130,7 +130,7 @@ async def index_project_embeddings(project_id: str, user=Depends(require_role("m
 
     vstore = get_vstore()
     print(
-        f"[FAISS] Embedding indexing requested for project '{pid}' "
+        f"[Postgres Vector] Embedding indexing requested for project '{pid}' "
         f"by {user.get('role')} '{user.get('user_id')}'..."
     )
 

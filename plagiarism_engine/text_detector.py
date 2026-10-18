@@ -5,22 +5,21 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from plagiarism_engine.arabic_preprocessor import normalize_arabic
+
 def normalize_arabic_text(text: str) -> str:
     """
     Normalizes Arabic text by:
-    - Stripping Tashkeel / Diacritics (ً ٌ ٍ َ ُ ِ ْ ّ).
+    - Stripping Tashkeel / Diacritics (ً ٌ ٍ َ ُ ِ ْ ّ and extended Quranic marks).
     - Stripping Tatweel / Kashida (ـ).
-    - Normalizing Alef variants (أ, إ, آ -> ا).
+    - Normalizing Alef variants (أ, إ, آ, ٱ -> ا).
     - Normalizing Teh Marbuta (ة -> ه).
     - Normalizing Alef Maqsura (ى -> ي).
     """
     if not text:
         return ""
 
-    text = re.sub(r'[\u064B-\u0652\u0640]', '', text)
-    text = re.sub(r'[\u0622\u0623\u0625]', '\u0627', text)
-    text = re.sub(r'\u0629', '\u0647', text)
-    text = re.sub(r'\u0649', '\u064A', text)
+    text = normalize_arabic(text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 

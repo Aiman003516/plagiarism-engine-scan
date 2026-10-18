@@ -1,0 +1,1321 @@
+{
+  "realeval_mizan_monorepo": {
+    "folder": "D:\\mizan_monorepo",
+    "files": 522,
+    "code_files": 469,
+    "text_files": 53,
+    "total_chars": 7090796,
+    "scan_seconds": 6.7,
+    "top_extensions": [
+      [
+        ".dart",
+        333
+      ],
+      [
+        ".sql",
+        71
+      ],
+      [
+        ".md",
+        48
+      ],
+      [
+        ".yaml",
+        27
+      ],
+      [
+        ".xml",
+        9
+      ],
+      [
+        ".cpp",
+        6
+      ],
+      [
+        ".h",
+        5
+      ],
+      [
+        ".json",
+        3
+      ],
+      [
+        ".txt",
+        3
+      ],
+      [
+        ".kts",
+        3
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "app_main",
+        504
+      ],
+      [
+        "docs",
+        10
+      ],
+      [
+        "scripts",
+        3
+      ],
+      [
+        "supabase",
+        2
+      ],
+      [
+        "windows-build-diagnostics",
+        2
+      ],
+      [
+        "skills-lock.json",
+        1
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 1439887,
+        "path": "app_main\\apps\\android_build_log.txt"
+      },
+      {
+        "chars": 756230,
+        "path": "windows-build-diagnostics\\windows-build-20260827-181856.txt"
+      },
+      {
+        "chars": 369329,
+        "path": "app_main\\packages\\core\\core_l10n\\lib\\src\\app_localizations.dart"
+      },
+      {
+        "chars": 162781,
+        "path": "app_main\\packages\\core\\core_l10n\\lib\\src\\app_localizations_en.dart"
+      },
+      {
+        "chars": 159935,
+        "path": "windows-build-diagnostics\\windows-build.log"
+      },
+      {
+        "chars": 159872,
+        "path": "app_main\\packages\\core\\core_l10n\\lib\\src\\app_localizations_ar.dart"
+      },
+      {
+        "chars": 71100,
+        "path": "app_main\\supabase\\AI_PHASE_1_2_3_COMBINED.sql"
+      },
+      {
+        "chars": 61945,
+        "path": "app_main\\docs\\MIZAN_HARDCODED_TEXT_CANDIDATE_REGISTER.md"
+      }
+    ]
+  },
+  "realeval_3d_react_website": {
+    "folder": "D:\\3d-react-website",
+    "files": 15,
+    "code_files": 15,
+    "text_files": 0,
+    "total_chars": 35423,
+    "scan_seconds": 0.2,
+    "top_extensions": [
+      [
+        ".jsx",
+        12
+      ],
+      [
+        ".html",
+        1
+      ],
+      [
+        ".json",
+        1
+      ],
+      [
+        ".css",
+        1
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "src",
+        13
+      ],
+      [
+        "index.html",
+        1
+      ],
+      [
+        "package.json",
+        1
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 5425,
+        "path": "src\\components\\Showcase.jsx"
+      },
+      {
+        "chars": 5318,
+        "path": "src\\components\\Footer.jsx"
+      },
+      {
+        "chars": 3842,
+        "path": "src\\components\\FloatingShapes.jsx"
+      },
+      {
+        "chars": 3595,
+        "path": "src\\components\\Features.jsx"
+      },
+      {
+        "chars": 3126,
+        "path": "src\\components\\Hero.jsx"
+      },
+      {
+        "chars": 2992,
+        "path": "src\\components\\Navbar.jsx"
+      },
+      {
+        "chars": 2376,
+        "path": "src\\components\\InteractiveCore.jsx"
+      },
+      {
+        "chars": 1719,
+        "path": "src\\index.css"
+      }
+    ]
+  },
+  "realeval_accounting": {
+    "folder": "D:\\accounting",
+    "files": 63,
+    "code_files": 61,
+    "text_files": 2,
+    "total_chars": 247089,
+    "scan_seconds": 0.7,
+    "top_extensions": [
+      [
+        ".dart",
+        26
+      ],
+      [
+        ".py",
+        10
+      ],
+      [
+        ".yaml",
+        9
+      ],
+      [
+        ".xml",
+        7
+      ],
+      [
+        ".kts",
+        3
+      ],
+      [
+        ".json",
+        2
+      ],
+      [
+        ".md",
+        2
+      ],
+      [
+        ".toml",
+        1
+      ],
+      [
+        ".java",
+        1
+      ],
+      [
+        ".kt",
+        1
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "apps",
+        33
+      ],
+      [
+        "accounting_template",
+        16
+      ],
+      [
+        "mcp_server",
+        10
+      ],
+      [
+        ".mcp.json",
+        1
+      ],
+      [
+        "IMPLEMENTATION_PLAN.md",
+        1
+      ],
+      [
+        "pyproject.toml",
+        1
+      ],
+      [
+        "run_mcp.py",
+        1
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 86875,
+        "path": "mcp_server\\plugins\\erp\\accounting_domain.py"
+      },
+      {
+        "chars": 30233,
+        "path": "mcp_server\\server.py"
+      },
+      {
+        "chars": 18806,
+        "path": "IMPLEMENTATION_PLAN.md"
+      },
+      {
+        "chars": 13220,
+        "path": ".mcp.json"
+      },
+      {
+        "chars": 9209,
+        "path": "mcp_server\\core\\codegen.py"
+      },
+      {
+        "chars": 9179,
+        "path": "mcp_server\\flutter_tools.py"
+      },
+      {
+        "chars": 8486,
+        "path": "mcp_server\\pubdev_client.py"
+      },
+      {
+        "chars": 6780,
+        "path": "apps\\mizan\\packages\\feature_billing\\lib\\src\\presentation\\paywall_screen.dart"
+      }
+    ]
+  },
+  "realeval_ai_engine": {
+    "folder": "D:\\AI engine",
+    "files": 187,
+    "code_files": 134,
+    "text_files": 53,
+    "total_chars": 2512660,
+    "scan_seconds": 19.1,
+    "top_extensions": [
+      [
+        ".py",
+        79
+      ],
+      [
+        ".tsx",
+        34
+      ],
+      [
+        ".md",
+        29
+      ],
+      [
+        ".pdf",
+        17
+      ],
+      [
+        ".ts",
+        8
+      ],
+      [
+        ".sh",
+        5
+      ],
+      [
+        ".docx",
+        4
+      ],
+      [
+        ".json",
+        4
+      ],
+      [
+        ".txt",
+        3
+      ],
+      [
+        ".html",
+        2
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "frontend",
+        45
+      ],
+      [
+        "biometric_security_engine",
+        40
+      ],
+      [
+        "plagiarism_engine_scan",
+        27
+      ],
+      [
+        "references",
+        26
+      ],
+      [
+        "plagiarism_engine",
+        7
+      ],
+      [
+        "ملفات المشروع",
+        7
+      ],
+      [
+        "scripts",
+        3
+      ],
+      [
+        "tests",
+        2
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 209469,
+        "path": "ملفات المشروع\\Secure-FEPRH_Expanded_English_Report.pdf"
+      },
+      {
+        "chars": 208661,
+        "path": "ملفات المشروع\\Secure-FEPRH_Expanded_English_Report.docx"
+      },
+      {
+        "chars": 167773,
+        "path": "ملفات المشروع\\Secure-FEPRH_Expanded_Arabic_Report.docx"
+      },
+      {
+        "chars": 164022,
+        "path": "ملفات المشروع\\Secure-FEPRH_Expanded_Arabic_Report.pdf"
+      },
+      {
+        "chars": 103595,
+        "path": "plagiarism_engine_scan\\frontend\\src\\pages\\Plagiarism.tsx"
+      },
+      {
+        "chars": 103128,
+        "path": "frontend\\src\\pages\\Plagiarism.tsx"
+      },
+      {
+        "chars": 68928,
+        "path": "2402.03216v5.pdf"
+      },
+      {
+        "chars": 59726,
+        "path": "sigmod03.pdf"
+      }
+    ]
+  },
+  "realeval_ai_surveillance_system": {
+    "folder": "D:\\AI surveillance system",
+    "files": 3,
+    "code_files": 2,
+    "text_files": 1,
+    "total_chars": 13122,
+    "scan_seconds": 3.9,
+    "top_extensions": [
+      [
+        ".py",
+        2
+      ],
+      [
+        ".csv",
+        1
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "monitor.py",
+        1
+      ],
+      [
+        "smart_agent.py",
+        1
+      ],
+      [
+        "evidence",
+        1
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 6923,
+        "path": "smart_agent.py"
+      },
+      {
+        "chars": 5644,
+        "path": "monitor.py"
+      },
+      {
+        "chars": 555,
+        "path": "evidence\\alert_log.csv"
+      }
+    ]
+  },
+  "realeval_application_of_tinyml": {
+    "folder": "D:\\application of TinyML",
+    "files": 52,
+    "code_files": 0,
+    "text_files": 52,
+    "total_chars": 481388,
+    "scan_seconds": 2.3,
+    "top_extensions": [
+      [
+        ".txt",
+        49
+      ],
+      [
+        ".pdf",
+        3
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "02_TinyML_C02_03-04-02-en (1).txt",
+        1
+      ],
+      [
+        "02_TinyML_C02_03-04-04-en.txt",
+        1
+      ],
+      [
+        "02_TinyML_C02_03-04-06-en.txt",
+        1
+      ],
+      [
+        "02_TinyML_C02_03-05-01-en.txt",
+        1
+      ],
+      [
+        "02_TinyML_C02_03-05-03-en.txt",
+        1
+      ],
+      [
+        "02_TinyML_C02_03-05-06-en.txt",
+        1
+      ],
+      [
+        "02_TinyML_C02_03-05-08-en.txt",
+        1
+      ],
+      [
+        "02_TinyML_C02_03-05-11-en.txt",
+        1
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 36731,
+        "path": "Speech Commands A Dataset for Limited-Vocabulary Speech.pdf"
+      },
+      {
+        "chars": 35498,
+        "path": "MobileNets Efficient Convolutional Neural Networks for Mobile Vision.pdf"
+      },
+      {
+        "chars": 22504,
+        "path": "MIMII DATASET SOUND DATASET.pdf"
+      },
+      {
+        "chars": 18818,
+        "path": "02_TinyML_C02_03-06-01-en.txt"
+      },
+      {
+        "chars": 18402,
+        "path": "02_TinyML_C02_03-04-02-en (1).txt"
+      },
+      {
+        "chars": 16180,
+        "path": "02_TinyML_C02_03-10-01-en.txt"
+      },
+      {
+        "chars": 15596,
+        "path": "02_TinyML_C02_03-05-20-en.txt"
+      },
+      {
+        "chars": 14883,
+        "path": "02_TinyML_C02_03-05-03-en.txt"
+      }
+    ]
+  },
+  "realeval_c_accounting_app_mizan": {
+    "folder": "D:\\C# accounting app(Mizan)",
+    "files": 36,
+    "code_files": 36,
+    "text_files": 0,
+    "total_chars": 34711,
+    "scan_seconds": 0.4,
+    "top_extensions": [
+      [
+        ".cs",
+        34
+      ],
+      [
+        ".sql",
+        2
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "Mizan",
+        36
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 4843,
+        "path": "Mizan\\ViewModels\\AddTransactionViewModel.cs"
+      },
+      {
+        "chars": 4110,
+        "path": "Mizan\\schema_update_v2.sql"
+      },
+      {
+        "chars": 2230,
+        "path": "Mizan\\accounts_table.sql"
+      },
+      {
+        "chars": 1413,
+        "path": "Mizan\\ViewModels\\MainWindowViewModel.cs"
+      },
+      {
+        "chars": 1410,
+        "path": "Mizan\\ViewModels\\AddAccountViewModel.cs"
+      },
+      {
+        "chars": 1293,
+        "path": "Mizan\\ViewModels\\CustomersViewModel.cs"
+      },
+      {
+        "chars": 1284,
+        "path": "Mizan\\ViewModels\\InvoicesViewModel.cs"
+      },
+      {
+        "chars": 1282,
+        "path": "Mizan\\ViewModels\\ProductsViewModel.cs"
+      }
+    ]
+  },
+  "realeval_compressed": {
+    "folder": "D:\\Compressed",
+    "files": 0,
+    "code_files": 0,
+    "text_files": 0,
+    "total_chars": 0,
+    "scan_seconds": 0.0,
+    "top_extensions": [],
+    "top_level_dirs": [],
+    "largest_files": []
+  },
+  "realeval_crystal_helix_erp": {
+    "folder": "D:\\crystal-helix-erp",
+    "files": 475,
+    "code_files": 471,
+    "text_files": 4,
+    "total_chars": 2688651,
+    "scan_seconds": 8.3,
+    "top_extensions": [
+      [
+        ".vue",
+        227
+      ],
+      [
+        ".py",
+        163
+      ],
+      [
+        ".ts",
+        78
+      ],
+      [
+        ".md",
+        3
+      ],
+      [
+        ".html",
+        1
+      ],
+      [
+        ".txt",
+        1
+      ],
+      [
+        ".json",
+        1
+      ],
+      [
+        ".css",
+        1
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "frontend",
+        307
+      ],
+      [
+        "backend",
+        164
+      ],
+      [
+        "code.html",
+        1
+      ],
+      [
+        "DESIGN.md",
+        1
+      ],
+      [
+        "MASTER_INSTRUCTIONS.md",
+        1
+      ],
+      [
+        "PROJECT_INSTRUCTIONS.md",
+        1
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 28988,
+        "path": "MASTER_INSTRUCTIONS.md"
+      },
+      {
+        "chars": 24744,
+        "path": "frontend\\modules\\account\\components\\JournalEntryForm.vue"
+      },
+      {
+        "chars": 22926,
+        "path": "PROJECT_INSTRUCTIONS.md"
+      },
+      {
+        "chars": 22462,
+        "path": "code.html"
+      },
+      {
+        "chars": 20226,
+        "path": "frontend\\modules\\maintenance\\components\\MaintenanceStageForm.vue"
+      },
+      {
+        "chars": 17877,
+        "path": "frontend\\modules\\hr\\components\\EmployeeForm.vue"
+      },
+      {
+        "chars": 17372,
+        "path": "frontend\\modules\\hr_recruitment\\components\\JobApplicantForm.vue"
+      },
+      {
+        "chars": 17168,
+        "path": "frontend\\modules\\stock\\components\\StockTransactionForm.vue"
+      }
+    ]
+  },
+  "realeval_cybersecurity_dip_projects": {
+    "folder": "D:\\CyberSecurity+DIP projects",
+    "files": 48,
+    "code_files": 26,
+    "text_files": 22,
+    "total_chars": 5602541,
+    "scan_seconds": 45.3,
+    "top_extensions": [
+      [
+        ".m",
+        10
+      ],
+      [
+        ".py",
+        9
+      ],
+      [
+        ".pdf",
+        8
+      ],
+      [
+        ".json",
+        7
+      ],
+      [
+        ".txt",
+        6
+      ],
+      [
+        ".csv",
+        5
+      ],
+      [
+        ".md",
+        3
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "DL",
+        22
+      ],
+      [
+        "DIP",
+        11
+      ],
+      [
+        "Cybersecurity",
+        10
+      ],
+      [
+        "robotics project",
+        5
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 5190667,
+        "path": "DIP\\train.csv"
+      },
+      {
+        "chars": 59101,
+        "path": "DL\\sample_medical_dataset.csv"
+      },
+      {
+        "chars": 44594,
+        "path": "DL\\Arabic_News_Project\\news_dataset.csv"
+      },
+      {
+        "chars": 25034,
+        "path": "DL\\build_massive_dataset.py"
+      },
+      {
+        "chars": 23105,
+        "path": "DL\\diabetes.csv"
+      },
+      {
+        "chars": 21882,
+        "path": "DL\\notebooks_code_dump.txt"
+      },
+      {
+        "chars": 19601,
+        "path": "Cybersecurity\\4-DES.pdf"
+      },
+      {
+        "chars": 19109,
+        "path": "DL\\massive_medical_dataset.csv"
+      }
+    ]
+  },
+  "realeval_encrypted_traffic_analysis": {
+    "folder": "D:\\Encrypted Traffic analysis",
+    "files": 11,
+    "code_files": 6,
+    "text_files": 5,
+    "total_chars": 45336,
+    "scan_seconds": 0.4,
+    "top_extensions": [
+      [
+        ".py",
+        6
+      ],
+      [
+        ".md",
+        2
+      ],
+      [
+        ".pdf",
+        2
+      ],
+      [
+        ".txt",
+        1
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "src",
+        6
+      ],
+      [
+        "Accuracy_Report.md",
+        1
+      ],
+      [
+        "Encrypted_Traffic_Analysis_Project.pdf",
+        1
+      ],
+      [
+        "Execution_Plan_IDS.pdf",
+        1
+      ],
+      [
+        "Final_Project_Roadmap.md",
+        1
+      ],
+      [
+        "requirements.txt",
+        1
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 12490,
+        "path": "Encrypted_Traffic_Analysis_Project.pdf"
+      },
+      {
+        "chars": 7408,
+        "path": "Execution_Plan_IDS.pdf"
+      },
+      {
+        "chars": 4410,
+        "path": "Final_Project_Roadmap.md"
+      },
+      {
+        "chars": 4230,
+        "path": "Accuracy_Report.md"
+      },
+      {
+        "chars": 4062,
+        "path": "src\\data_processing.py"
+      },
+      {
+        "chars": 3167,
+        "path": "src\\train.py"
+      },
+      {
+        "chars": 2926,
+        "path": "src\\models.py"
+      },
+      {
+        "chars": 2473,
+        "path": "src\\infer.py"
+      }
+    ]
+  },
+  "realeval_frontend": {
+    "folder": "D:\\frontend",
+    "files": 46,
+    "code_files": 46,
+    "text_files": 0,
+    "total_chars": 270142,
+    "scan_seconds": 0.5,
+    "top_extensions": [
+      [
+        ".tsx",
+        31
+      ],
+      [
+        ".sh",
+        5
+      ],
+      [
+        ".ts",
+        4
+      ],
+      [
+        ".py",
+        2
+      ],
+      [
+        ".json",
+        2
+      ],
+      [
+        ".html",
+        1
+      ],
+      [
+        ".css",
+        1
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "src",
+        35
+      ],
+      [
+        "add_translations.sh",
+        1
+      ],
+      [
+        "backend.py",
+        1
+      ],
+      [
+        "backend_chat_api.py",
+        1
+      ],
+      [
+        "index.html",
+        1
+      ],
+      [
+        "metadata.json",
+        1
+      ],
+      [
+        "package.json",
+        1
+      ],
+      [
+        "refactor.sh",
+        1
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 26497,
+        "path": "src\\pages\\Projects.tsx"
+      },
+      {
+        "chars": 21413,
+        "path": "src\\pages\\Reports.tsx"
+      },
+      {
+        "chars": 15747,
+        "path": "src\\components\\layout\\Topbar.tsx"
+      },
+      {
+        "chars": 15601,
+        "path": "src\\pages\\UserManagement.tsx"
+      },
+      {
+        "chars": 12835,
+        "path": "src\\pages\\Plagiarism.tsx"
+      },
+      {
+        "chars": 12663,
+        "path": "src\\pages\\CommandCenter.tsx"
+      },
+      {
+        "chars": 12612,
+        "path": "src\\pages\\ProjectDetail.tsx"
+      },
+      {
+        "chars": 11830,
+        "path": "src\\pages\\Register.tsx"
+      }
+    ]
+  },
+  "realeval_local_agent_ui_ready": {
+    "folder": "D:\\local-agent-ui-ready",
+    "files": 31,
+    "code_files": 26,
+    "text_files": 5,
+    "total_chars": 139337,
+    "scan_seconds": 0.7,
+    "top_extensions": [
+      [
+        ".py",
+        23
+      ],
+      [
+        ".md",
+        3
+      ],
+      [
+        ".txt",
+        2
+      ],
+      [
+        ".sh",
+        1
+      ],
+      [
+        ".js",
+        1
+      ],
+      [
+        ".html",
+        1
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "agentic_runtime",
+        11
+      ],
+      [
+        "plugins",
+        4
+      ],
+      [
+        "tests",
+        4
+      ],
+      [
+        "workspace",
+        4
+      ],
+      [
+        "app.py",
+        1
+      ],
+      [
+        "FEATURE_TARGETS.md",
+        1
+      ],
+      [
+        "requirements.txt",
+        1
+      ],
+      [
+        "SYSTEM_FEATURE_REPORT.md",
+        1
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 13035,
+        "path": "SYSTEM_FEATURE_REPORT.md"
+      },
+      {
+        "chars": 12357,
+        "path": "agentic_runtime\\tools.py"
+      },
+      {
+        "chars": 11942,
+        "path": "agentic_runtime\\runtime.py"
+      },
+      {
+        "chars": 11927,
+        "path": "agentic_runtime\\gateway.py"
+      },
+      {
+        "chars": 10051,
+        "path": "static\\app.js"
+      },
+      {
+        "chars": 8741,
+        "path": "tests\\test_agent_runtime.py"
+      },
+      {
+        "chars": 8593,
+        "path": "app.py"
+      },
+      {
+        "chars": 8223,
+        "path": "agentic_runtime\\__main__.py"
+      }
+    ]
+  },
+  "realeval_lordsmobilebot": {
+    "folder": "D:\\LordsMobileBot",
+    "files": 9,
+    "code_files": 6,
+    "text_files": 3,
+    "total_chars": 129313,
+    "scan_seconds": 2.6,
+    "top_extensions": [
+      [
+        ".py",
+        4
+      ],
+      [
+        ".html",
+        2
+      ],
+      [
+        ".docx",
+        1
+      ],
+      [
+        ".pdf",
+        1
+      ],
+      [
+        ".txt",
+        1
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "adb_controller.py",
+        1
+      ],
+      [
+        "bot.py",
+        1
+      ],
+      [
+        "game_data.py",
+        1
+      ],
+      [
+        "Lords Mobile AI Bot Planner.docx",
+        1
+      ],
+      [
+        "Lords Mobile AI Bot Planner.pdf",
+        1
+      ],
+      [
+        "lords_mobile_ai_bot_dashboard (1).html",
+        1
+      ],
+      [
+        "lords_mobile_ai_bot_dashboard.html",
+        1
+      ],
+      [
+        "requirements.txt",
+        1
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 37436,
+        "path": "Lords Mobile AI Bot Planner.pdf"
+      },
+      {
+        "chars": 31157,
+        "path": "Lords Mobile AI Bot Planner.docx"
+      },
+      {
+        "chars": 30418,
+        "path": "lords_mobile_ai_bot_dashboard (1).html"
+      },
+      {
+        "chars": 20179,
+        "path": "lords_mobile_ai_bot_dashboard.html"
+      },
+      {
+        "chars": 3214,
+        "path": "adb_controller.py"
+      },
+      {
+        "chars": 2756,
+        "path": "bot.py"
+      },
+      {
+        "chars": 2457,
+        "path": "vision.py"
+      },
+      {
+        "chars": 1641,
+        "path": "game_data.py"
+      }
+    ]
+  },
+  "realeval_manus_like_agent": {
+    "folder": "D:\\manus-like agent",
+    "files": 215,
+    "code_files": 191,
+    "text_files": 24,
+    "total_chars": 2671746,
+    "scan_seconds": 0.2,
+    "top_extensions": [
+      [
+        ".py",
+        148
+      ],
+      [
+        ".tsx",
+        22
+      ],
+      [
+        ".md",
+        19
+      ],
+      [
+        ".json",
+        6
+      ],
+      [
+        ".txt",
+        5
+      ],
+      [
+        ".ts",
+        5
+      ],
+      [
+        ".yml",
+        4
+      ],
+      [
+        ".toml",
+        1
+      ],
+      [
+        ".sh",
+        1
+      ],
+      [
+        ".yaml",
+        1
+      ]
+    ],
+    "top_level_dirs": [
+      [
+        "cortex",
+        100
+      ],
+      [
+        "sandbox_workspace",
+        38
+      ],
+      [
+        "web",
+        33
+      ],
+      [
+        "titan-reference-for-cortex",
+        12
+      ],
+      [
+        "monitoring",
+        4
+      ],
+      [
+        "scripts",
+        2
+      ],
+      [
+        "cortex.py",
+        1
+      ],
+      [
+        "DEPLOY.md",
+        1
+      ]
+    ],
+    "largest_files": [
+      {
+        "chars": 889568,
+        "path": "full_project_context.txt"
+      },
+      {
+        "chars": 62136,
+        "path": "MASTER_PLAN.md"
+      },
+      {
+        "chars": 50960,
+        "path": "titan-reference-for-cortex\\module_definitions_v3.py"
+      },
+      {
+        "chars": 40717,
+        "path": "cortex\\agents\\erp_builder.py"
+      },
+      {
+        "chars": 36618,
+        "path": "cortex\\core\\providers.py"
+      },
+      {
+        "chars": 35846,
+        "path": "titan-reference-for-cortex\\prepare_training_data.py"
+      },
+      {
+        "chars": 34391,
+        "path": "titan-reference-for-cortex\\code_templates.py"
+      },
+      {
+        "chars": 32610,
+        "path": "cortex\\agents\\enhanced_coordinator.py"
+      }
+    ]
+  }
+}

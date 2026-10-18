@@ -88,7 +88,8 @@ async def upload_and_scan(
                 tmp.write(raw)
                 tmp_path = tmp.name
             try:
-                content = FileExtractor().extract_file(tmp_path) or ""
+                extracted = FileExtractor().extract_file(tmp_path)
+                content = extracted.get("content", "") if isinstance(extracted, dict) else (extracted or "")
             finally:
                 os.unlink(tmp_path)
         else:
@@ -130,7 +131,8 @@ async def upload_and_scan_stream(
                 tmp.write(raw)
                 tmp_path = tmp.name
             try:
-                content = FileExtractor().extract_file(tmp_path) or ""
+                extracted = FileExtractor().extract_file(tmp_path)
+                content = extracted.get("content", "") if isinstance(extracted, dict) else (extracted or "")
             finally:
                 os.unlink(tmp_path)
         else:

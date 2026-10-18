@@ -1,4 +1,4 @@
-"""On-demand FAISS embedding indexing (decoupled from the upload stream)."""
+"""On-demand Postgres vector embedding indexing (decoupled from the upload stream)."""
 
 from typing import Dict
 
@@ -6,7 +6,7 @@ from plagiarism_engine import VectorStore, SystemDBStore
 
 
 # ---------------------------------------------------------------------------
-# On-demand FAISS embedding indexing (decoupled from the upload stream)
+# On-demand Postgres vector embedding indexing (decoupled from the upload stream)
 # ---------------------------------------------------------------------------
 def _index_project_embeddings(
     vstore: VectorStore,
@@ -14,13 +14,13 @@ def _index_project_embeddings(
     project_id: str,
     log_callback=None,
 ) -> Dict[str, int]:
-    """(Re)build a project's FAISS embeddings from its DB-stored files.
+    """(Re)build a project's Postgres vector embeddings from its DB-stored files.
 
     Embedding generation was decoupled from the upload stream (``_run_intake``)
     for performance, so every freshly uploaded project starts with an EMPTY
     vector index. This routine is the single place that fills it: it is called
     on demand by POST /api/plagiarism/projects/{project_id}/index-embeddings
-    and automatically by Deep Scan when a project has no vectors yet.
+    and automatically by Deep Scan / Hybrid Fusion when a project has no vectors yet.
 
     Any vectors already stored for the project are purged first, so repeated
     calls stay idempotent instead of stacking duplicate embeddings for the
@@ -39,7 +39,7 @@ def _index_project_embeddings(
     )
 
     print(
-        f"[FAISS] Project '{project_id}': indexed {added.get('code', 0)} code + "
+        f"[Postgres Vector] Project '{project_id}': indexed {added.get('code', 0)} code + "
         f"{added.get('text', 0)} text vectors from {len(files_data)} stored files."
     )
     return added

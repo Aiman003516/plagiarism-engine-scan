@@ -8,7 +8,9 @@ import threading
 from datetime import datetime
 
 from plagiarism_engine import VectorStore, SystemDBStore
+from plagiarism_engine.config import load_project_env
 
+load_project_env()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -60,9 +62,14 @@ def _get_deep_scan_model(model_name: str):
         if model_key in _deep_scan_models:
             return _deep_scan_models[model_key]
 
-        model_path = os.path.join(_MODELS_DIR, model_name)
+        models_dir = os.environ.get("MODELS_DIR", _MODELS_DIR)
+        model_path = os.path.join(models_dir, model_name)
         if not Path(model_path).exists():
-            raise FileNotFoundError(f"Model path not found: {model_path}")
+            alt_path = os.path.join(r"D:\AI engine\models", model_name)
+            if Path(alt_path).exists():
+                model_path = alt_path
+            else:
+                raise FileNotFoundError(f"Model path not found: {model_path}")
 
         model = SentenceTransformer(model_path)
         # UniXcoder / BGE-M3 positional embeddings are bounded; cap the
@@ -85,10 +92,7 @@ def get_db() -> SystemDBStore:
 def get_vstore() -> VectorStore:
     global _vstore
     if _vstore is None:
-        _vstore = VectorStore(
-            index_dir=str(DATA_DIR / "faiss_index"),
-            mapping_path=str(DATA_DIR / "faiss_mapping.json"),
-        )
+        _vstore = VectorStore()
     return _vstore
 
 

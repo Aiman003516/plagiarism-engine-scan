@@ -169,7 +169,8 @@ class UsersStoreMixin:
                     if key == "email":
                         updates[key] = clean_str(value).lower()
                     elif key == "requires_password_change":
-                        updates[key] = _as_bool_flag(value)
+                        flag = _as_bool_flag(value)
+                        updates[key] = bool(flag) if self.mode == "postgresql" else flag
                     else:
                         updates[key] = clean_str(value)
             if not updates:
@@ -218,7 +219,8 @@ class UsersStoreMixin:
             senum = clean_str(enrollment_number).strip()
             sname = clean_str(name)
             sph = clean_str(password_hash)
-            sflag = _as_bool_flag(requires_password_change)
+            sflag_int = _as_bool_flag(requires_password_change)
+            sflag = bool(sflag_int) if self.mode == "postgresql" else sflag_int
 
             if self.mode == "postgresql":
                 cur.execute("""
@@ -322,7 +324,8 @@ class UsersStoreMixin:
             for key, value in fields.items():
                 if key in allowed and value is not None:
                     if key == "requires_password_change":
-                        updates[key] = _as_bool_flag(value)
+                        flag = _as_bool_flag(value)
+                        updates[key] = bool(flag) if self.mode == "postgresql" else flag
                     else:
                         updates[key] = clean_str(value)
             if not updates:

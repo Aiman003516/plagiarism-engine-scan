@@ -143,7 +143,7 @@ export function PlagiarismAnalysis() {
         setScanPhase("Computing MinHash signatures...");
       } else if (simulated < 60) {
         simulated += 2;
-        setScanPhase("Querying FAISS vector index...");
+        setScanPhase("Querying Postgres 2-Step vector index...");
       } else {
         simulated += 1;
         setScanPhase("Calculating overlap coefficients...");
@@ -426,9 +426,39 @@ export function PlagiarismAnalysis() {
                             {cmp.type}
                           </span>
                         </td>
-                        <td className="p-3 font-bold">{cmp.similarity}</td>
                         <td className="p-3">
-                          <span className={`px-2 py-1 rounded text-xs font-bold ${cmp.status === 'FLAGGED' ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-amber-500/10 text-yellow-700 dark:text-amber-400'}`}>
+                          {cmp.winnowing_score !== undefined ? (
+                            <div className="flex flex-col gap-1.5 w-36">
+                              <div className="flex items-center gap-2 text-[10px]" title="Winnowing: Exact copy-paste detection">
+                                <div className="w-full bg-border rounded-full h-1.5 overflow-hidden">
+                                  <div className="bg-blue-500 h-full" style={{ width: `${cmp.winnowing_score}%` }} />
+                                </div>
+                                <span className="w-8 text-right font-medium text-blue-600 dark:text-blue-400">{cmp.winnowing_score}%</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px]" title="Semantic: Paraphrasing & meaning match">
+                                <div className="w-full bg-border rounded-full h-1.5 overflow-hidden">
+                                  <div className="bg-purple-500 h-full" style={{ width: `${cmp.semantic_score}%` }} />
+                                </div>
+                                <span className="w-8 text-right font-medium text-purple-600 dark:text-purple-400">{cmp.semantic_score}%</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px]" title={`Fusion: Combined score (Î±=${cmp.alpha})`}>
+                                <div className="w-full bg-border rounded-full h-1.5 overflow-hidden">
+                                  <div className="bg-orange-500 h-full" style={{ width: `${cmp.fusion_score}%` }} />
+                                </div>
+                                <span className="w-8 text-right font-bold text-orange-600 dark:text-orange-400">{cmp.fusion_score}%</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="font-bold">{cmp.similarity}</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <span className={`px-2 py-1 rounded text-xs font-bold ${
+                            cmp.status === 'CRITICAL' ? 'bg-red-600/10 text-red-600 dark:text-red-400 border border-red-500/20' :
+                            cmp.status === 'HIGH' ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400' :
+                            cmp.status === 'LOW' ? 'bg-amber-500/10 text-yellow-700 dark:text-amber-400' :
+                            'bg-green-500/10 text-green-600 dark:text-green-400'
+                          }`}>
                             {cmp.status}
                           </span>
                         </td>
@@ -497,9 +527,11 @@ export function PlagiarismAnalysis() {
                 <div className="text-xs font-medium text-text-muted mb-2">Verdict</div>
                 <span
                   className={`inline-block px-3 py-1.5 rounded-full text-sm font-bold border ${
-                    deepScanResult.verdict === 'CONFIRMED_PLAGIARISM'
+                    deepScanResult.verdict === 'HIGH' || deepScanResult.verdict === 'CRITICAL'
                       ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30'
-                      : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                      : deepScanResult.verdict === 'LOW'
+                        ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                        : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
                   }`}
                 >
                   {deepScanResult.verdict}

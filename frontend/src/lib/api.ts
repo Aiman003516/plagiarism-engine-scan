@@ -163,8 +163,12 @@ export interface PlagiarismComparison {
   matched_file?: string;
   university?: string;
   similarity: string;
+  winnowing_score?: number;
+  semantic_score?: number;
+  fusion_score?: number;
+  alpha?: number;
   type: string;
-  status: "Safe" | "Moderate" | "FLAGGED";
+  status: "SAFE" | "LOW" | "HIGH" | "CRITICAL" | "Safe" | "Moderate" | "FLAGGED";
   submitted_snippet?: string;
   matched_snippet?: string;
   file1?: string;
@@ -201,7 +205,7 @@ export interface PlagiarismScanResult {
   overall_similarity: number;
   code_similarity: number;
   text_similarity: number;
-  verdict: "SAFE" | "FLAGGED";
+  verdict: "SAFE" | "LOW" | "HIGH" | "CRITICAL" | "FLAGGED";
   threshold: number;
   comparisons: PlagiarismComparison[];
   logs?: string[];
@@ -257,10 +261,11 @@ export interface ProjectFile {
 }
 
 export interface DeepScanResult {
-  ai_similarity: number;
+  ai_similarity: number;        // calibrated semantic score (%)
+  ai_similarity_raw?: number;   // raw cosine (%)
   model_used: string;
   method: string;
-  verdict: string;
+  verdict: 'SAFE' | 'LOW' | 'HIGH' | 'CRITICAL' | string;
   file1: string;
   file2: string;
 }
@@ -763,6 +768,8 @@ export interface DashboardStats {
   total_files: number;
   recent_scans: Array<Record<string, any>>;
   flagged_count: number;
+  average_fusion_score?: number;
+  verdicts_distribution?: { SAFE: number; LOW: number; HIGH: number; CRITICAL: number; FLAGGED: number; };
 }
 
 export const dashboardApi = {

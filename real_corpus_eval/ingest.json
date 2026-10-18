@@ -1,0 +1,133 @@
+{
+  "realeval_mizan_monorepo": {
+    "folder": "D:\\mizan_monorepo",
+    "files": 522,
+    "code_files": 469,
+    "text_files": 53,
+    "loc": 129333,
+    "extract_seconds": 0.5,
+    "intake_seconds": 56.4
+  },
+  "realeval_3d_react_website": {
+    "folder": "D:\\3d-react-website",
+    "files": 15,
+    "code_files": 15,
+    "text_files": 0,
+    "loc": 962,
+    "extract_seconds": 0.0,
+    "intake_seconds": 0.4
+  },
+  "realeval_accounting": {
+    "folder": "D:\\accounting",
+    "files": 63,
+    "code_files": 61,
+    "text_files": 2,
+    "loc": 5649,
+    "extract_seconds": 0.1,
+    "intake_seconds": 2.6
+  },
+  "realeval_ai_engine": {
+    "folder": "D:\\AI engine",
+    "files": 187,
+    "code_files": 134,
+    "text_files": 53,
+    "loc": 41279,
+    "extract_seconds": 18.1,
+    "intake_seconds": 27.0
+  },
+  "realeval_ai_surveillance_system": {
+    "folder": "D:\\AI surveillance system",
+    "files": 3,
+    "code_files": 2,
+    "text_files": 1,
+    "loc": 266,
+    "extract_seconds": 3.1,
+    "intake_seconds": 0.1
+  },
+  "realeval_application_of_tinyml": {
+    "folder": "D:\\application of TinyML",
+    "files": 52,
+    "code_files": 0,
+    "text_files": 52,
+    "loc": 8383,
+    "extract_seconds": 1.3,
+    "intake_seconds": 3.8
+  },
+  "realeval_c_accounting_app_mizan": {
+    "folder": "D:\\C# accounting app(Mizan)",
+    "files": 36,
+    "code_files": 36,
+    "text_files": 0,
+    "loc": 1121,
+    "extract_seconds": 0.0,
+    "intake_seconds": 0.7
+  },
+  "realeval_compressed": {
+    "folder": "D:\\Compressed",
+    "files": 0,
+    "skipped": "no ingestible source/text files"
+  },
+  "realeval_crystal_helix_erp": {
+    "folder": "D:\\crystal-helix-erp",
+    "files": 475,
+    "code_files": 471,
+    "text_files": 4,
+    "loc": 60967,
+    "extract_seconds": 0.4,
+    "intake_seconds": 28.1
+  },
+  "realeval_cybersecurity_dip_projects": {
+    "folder": "D:\\CyberSecurity+DIP projects",
+    "files": 48,
+    "code_files": 26,
+    "text_files": 22,
+    "loc": 54932,
+    "extract_seconds": 27.7,
+    "intake_seconds": 38.3
+  },
+  "realeval_encrypted_traffic_analysis": {
+    "folder": "D:\\Encrypted Traffic analysis",
+    "files": 11,
+    "code_files": 6,
+    "text_files": 5,
+    "loc": 761,
+    "extract_seconds": 0.2,
+    "intake_seconds": 0.4
+  },
+  "realeval_frontend": {
+    "folder": "D:\\frontend",
+    "files": 46,
+    "code_files": 46,
+    "text_files": 0,
+    "loc": 5806,
+    "extract_seconds": 0.0,
+    "intake_seconds": 2.0
+  },
+  "realeval_local_agent_ui_ready": {
+    "folder": "D:\\local-agent-ui-ready",
+    "files": 31,
+    "code_files": 26,
+    "text_files": 5,
+    "loc": 2644,
+    "extract_seconds": 0.0,
+    "intake_seconds": 1.6
+  },
+  "realeval_lordsmobilebot": {
+    "folder": "D:\\LordsMobileBot",
+    "files": 9,
+    "code_files": 6,
+    "text_files": 3,
+    "loc": 3699,
+    "extract_seconds": 3.9,
+    "intake_seconds": 1.2
+  },
+  "realeval_manus_like_agent": {
+    "folder": "D:\\manus-like agent",
+    "files": 215,
+    "code_files": 191,
+    "text_files": 24,
+    "loc": 58894,
+    "extract_seconds": 0.2,
+    "intake_seconds": 22.1
+  }
+}

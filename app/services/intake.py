@@ -226,49 +226,154 @@ def _run_analysis(
 
     log(f"   ✅ Scan complete: {len(all_comparisons)} matches from {total_candidates} candidates.")
 
-    # Phase 3: ML-enhanced verification on top Winnowing matches
-    log("[PHASE 3/3] 🤖 Running ML verification on top matches...")
-    code_detector = CodePlagiarismDetector()
-    text_detector = TextPlagiarismDetector()
+    # Phase 3: Hybrid Fusion Scoring (Winnowing + Semantic)
+    log("[PHASE 3/3] 🧬 Running Hybrid Fusion Algorithm (Lexical + Semantic)...")
+    from plagiarism_engine.fusion_scorer import compute_fusion_score
+    from plagiarism_engine.winnowing import WinnowingEngine
+    from app.state import get_vstore
+    
+    winnow_engine = WinnowingEngine()
+    vstore = get_vstore()
+    
+    # Ensure the scanned project and every lexically matched project have current embeddings
+    # (both are required to fuse those pairs). The scanned project is indexed first, and each
+    # project is isolated so a single failing corpus project cannot disable semantic search.
+    #
+    # Semantic-only discovery (pairs Winnowing missed) searches the projects that ALREADY have
+    # vectors. Quick Scan deliberately does not embed the rest of the corpus synchronously: on real
+    # data a 3-file project with no lexical candidates otherwise spent 25+ minutes embedding ~870
+    # files of unrelated projects. Deep Scan (deep-scan-bulk) still indexes the wider corpus.
+    from app.services.embeddings import _index_project_embeddings
+    candidate_projects = sorted({cmp["project"] for cmp in all_comparisons} - {project_name})
+    projects_to_index = [project_name] + candidate_projects
 
-    for cmp in all_comparisons[:20]:  # Only verify top 20 to save time
+    for pid in projects_to_index:
+        try:
+            if vstore.needs_reindex(pid):
+                log(f"   🤖 Indexing missing/stale vectors for project '{pid}'...")
+                _index_project_embeddings(vstore, db, pid)
+        except Exception as e:
+            log(f"   ⚠️ Semantic indexing failed for project '{pid}': {e}")
+
+    try:
+        unindexed = [
+            p.get("id") or p.get("name") for p in db.get_all_projects(limit=200)
+            if (p.get("id") or p.get("name")) not in projects_to_index
+            and vstore.count_project_vectors(p.get("id") or p.get("name")) == 0
+        ]
+        if unindexed:
+            log(f"   ℹ️ {len(unindexed)} corpus project(s) have no semantic vectors yet and are only covered "
+                f"lexically in Quick Scan; run Deep Scan or POST /projects/{{id}}/index-embeddings to include them.")
+    except Exception:
+        pass
+
+    # Fetch top semantic matches from Postgres 2-step rescoring store
+    semantic_lookup = {}
+    try:
+        semantic_matches = vstore.search_bulk(project_name)
+        existing_pairs = {(c["file1"], c["project"], c["file2"]) for c in all_comparisons}
+        for m in semantic_matches:
+            src_file = m.get("source_file", "")
+            tgt_proj = m.get("matched_project_id") or m.get("target_project", "")
+            tgt_file = m.get("matched_file") or m.get("target_file", "")
+            sim = float(m.get("similarity", 0.0))
+            if src_file and tgt_proj and tgt_file:
+                key = (src_file, tgt_proj, tgt_file)
+                semantic_lookup[key] = sim
+                # Include high-confidence semantic matches even if lexical Winnowing missed them (pure paraphrase)
+                if sim >= 0.70 and key not in existing_pairs:
+                    existing_pairs.add(key)
+                    domain_label = "Code" if m.get("domain") == "code" else "Text"
+                    all_comparisons.append({
+                        "project": tgt_proj,
+                        "file1": src_file,
+                        "file2": tgt_file,
+                        "similarity": f"{round(sim * 100, 2)}%",
+                        "type": domain_label,
+                        "status": "FLAGGED" if sim >= 0.76 else "Moderate",
+                    })
+    except Exception as e:
+        log(f"   ⚠️ Semantic search failed: {e}")
+
+    # Pre-cache source contents for speed
+    source_contents = {f.get("relative_path", ""): f.get("content", "") for f in project_files}
+
+    # Evaluate the top matches (or all of them) with the Fusion Engine
+    max_fusion_score = 0.0
+    final_verdict = "SAFE"
+    
+    for cmp in all_comparisons:
         try:
             other_pid = cmp["project"]
-            source_content = ""
+            rel_path = cmp["file1"]
+            other_path = cmp["file2"]
+            source_content = source_contents.get(rel_path, "")
             target_content = ""
 
-            # Get source file content
-            for f in project_files:
-                if f.get("relative_path", "") == cmp.get("file1", ""):
-                    source_content = f.get("content", "")
-                    break
-
-            # Get target file content from DB.
-            # NOTE: get_files_by_paths() excludes the project_id passed to it, so we pass the
-            # *source* project and then select the row belonging to the matched (other) project.
-            target_files = db.get_files_by_paths(project_name, [cmp.get("file2", "")])
-            matched = [
-                t for t in target_files
-                if t.get("project_id") == other_pid and t.get("relative_path") == cmp.get("file2", "")
-            ]
-            if matched:
-                target_content = matched[0].get("content", "")
-            elif target_files:
+            # Get target file content from DB filtered by exact target project_id
+            target_files = db.get_files_by_paths(project_name, [other_path], target_project_id=other_pid)
+            if target_files:
                 target_content = target_files[0].get("content", "")
 
             if source_content and target_content:
-                if cmp.get("type") == "Code":
-                    # compare_code() reports its hybrid composite score under the "similarity" key.
-                    ml_result = code_detector.compare_code(source_content, target_content)
-                    cmp["ml_similarity"] = f"{round(ml_result.get('similarity', 0) * 100, 2)}%"
-                else:
-                    ml_result = text_detector.compare_pair(source_content, target_content)
-                    cmp["ml_similarity"] = f"{round(ml_result.get('similarity', 0) * 100, 2)}%"
-        except Exception as e:
-            cmp["ml_similarity"] = "N/A"
+                # Get the pre-calculated Semantic Score from pgvector (or compute pair similarity if not in top-k)
+                sem_key = (rel_path, other_pid, other_path)
+                precalc_semantic_score = semantic_lookup.get(sem_key)
+                if precalc_semantic_score is None:
+                    precalc_semantic_score = vstore.get_pair_similarity(project_name, rel_path, other_pid, other_path)
 
-    overall = round(max(max_code_sim, max_text_sim) * 100, 2)
-    verdict = "FLAGGED" if overall >= 65 else "SAFE"
+                # Execute Hybrid Fusion Math
+                fusion_result = compute_fusion_score(
+                    file_a_content=source_content,
+                    file_b_content=target_content,
+                    semantic_score=precalc_semantic_score,
+                    file_type="code" if cmp.get("type") == "Code" else "text",
+                    winnowing_engine=winnow_engine,
+                    filename=rel_path,
+                )
+
+                # Update frontend comparison object
+                cmp["similarity"] = f"{fusion_result['fusion_score']}%"  # Show fusion score as main
+                cmp["winnowing_score"] = fusion_result["winnowing_score"]
+                cmp["semantic_score"] = fusion_result["semantic_score"]
+                cmp["fusion_score"] = fusion_result["fusion_score"]
+                cmp["containment_score"] = fusion_result["containment_score"]
+                cmp["embedded_copy"] = fusion_result["embedded_copy"]
+                cmp["alpha"] = fusion_result["alpha"]
+                cmp["status"] = fusion_result["verdict"]
+
+                # Track global max score
+                max_fusion_score = max(max_fusion_score, fusion_result["fusion_score"])
+
+                # Store in PostgreSQL scan_reports
+                report_id = f"report_{uuid.uuid4().hex[:8]}"
+                if hasattr(db, 'mode'):  # Standard projects_store usage
+                    conn = db._get_connection()
+                    try:
+                        cur = conn.cursor()
+                        if db.mode == "postgresql":
+                            cur.execute("""
+                                INSERT INTO scan_reports (id, query_id, target_id, similarity_score, winnowing_score, semantic_score, fusion_score, alpha, verdict, match_type, details)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (id) DO NOTHING;
+                            """, (report_id, f"{project_name}::{rel_path}", f"{other_pid}::{other_path}", fusion_result["fusion_score"], fusion_result["winnowing_score"], fusion_result["semantic_score"], fusion_result["fusion_score"], fusion_result["alpha"], fusion_result["verdict"], cmp.get("type", "unknown"), "Hybrid Fusion"))
+                        else:
+                            cur.execute("""
+                                INSERT OR REPLACE INTO scan_reports (id, query_id, target_id, similarity_score, winnowing_score, semantic_score, fusion_score, alpha, verdict, match_type, details)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                            """, (report_id, f"{project_name}::{rel_path}", f"{other_pid}::{other_path}", fusion_result["fusion_score"], fusion_result["winnowing_score"], fusion_result["semantic_score"], fusion_result["fusion_score"], fusion_result["alpha"], fusion_result["verdict"], cmp.get("type", "unknown"), "Hybrid Fusion"))
+                        conn.commit()
+                    finally:
+                        conn.close()
+
+        except Exception as e:
+            cmp["fusion_score"] = 0
+            cmp["status"] = "ERROR"
+            print(f"Fusion error on {cmp['file1']}: {e}")
+
+    overall = max_fusion_score
+    from plagiarism_engine.fusion_scorer import verdict_for
+    verdict = verdict_for(overall / 100.0)
 
     log(f"✅ Full run complete. Overall similarity: {overall}% — Verdict: {verdict}")
 

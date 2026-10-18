@@ -167,7 +167,9 @@ S_final(A, B) = α · S_winnowing(A, B) + (1 - α) · S_semantic(A, B)
 
 Where:
 - S_winnowing = Jaccard similarity of Winnowing fingerprint sets
-- S_semantic  = Cosine similarity of embedding vectors (from FAISS or pgvector)
+- S_semantic  = *Calibrated* cosine similarity of embedding vectors (PostgreSQL BIT(1024) 2-step rescoring):
+  `clip((cos - floor_model) / (1 - floor_model), 0, 1)`, where `floor_model` is the mean unrelated-pair
+  cosine measured per model in `calibration_results.md` (Round 2). Raw cosine is kept as `similarity_raw`.
 - α (alpha)   = Adaptive weight, determined by file characteristics
 
 ### 4.2 Adaptive Weight (α) Rules
@@ -176,8 +178,9 @@ Where:
 |------------------------------------|---------|-----------------------------------------------------|
 | Code file (`.py`, `.java`, `.cpp`) | 0.6     | Code has rigid structure; exact matching is strong   |
 | Text file (`.txt`, `.md`, `.docx`) | 0.3     | Students paraphrase text; semantics matter more      |
+| Arabic or mixed Arabic/English text | 0.25   | Rich morphology and synonymy; semantics dominate     |
 | Small file (< k tokens)           | 1.0     | Only exact match; semantics unreliable on tiny data  |
-| Mixed project (code + docs)        | 0.5     | Balanced weight for mixed content                    |
+| Mixed project (code + docs)        | 0.5     | Balanced weight for mixed content — **project-level concept; not applied per file pair** (each pair is compared within one domain, code or text). Retained only as the `else` fallback in `fusion_scorer.py`. |
 | PDF academic paper                 | 0.2     | Heavy paraphrasing expected; semantics dominate      |
 
 ### 4.3 Verdict Thresholds

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter
 from app.dependencies import require_role
 from app.services.embeddings import _index_project_embeddings
-from app.state import _get_deep_scan_model, get_db, get_vstore
+from app.state import get_db, get_vstore
 
 router = APIRouter(tags=["deep-scan"])
 
@@ -112,31 +112,34 @@ async def deep_scan(req: DeepScanRequest):
         file_type = "text"
 
     # --- 3/4. Load model + encode + compute cosine similarity --------------
-    model_name = "unixcoder-base" if file_type == "code" else "bge-m3"
+    # Same model selection, calibration and verdict scale as the hybrid pipeline.
+    from plagiarism_engine.vector_store import model_pool, DOMAIN_MODEL_KEYS
+    from plagiarism_engine.fusion_scorer import calibrate_semantic, verdict_for
+
+    model, model_name = model_pool.get_model_with_name(DOMAIN_MODEL_KEYS[file_type])
+    if model is None:
+        raise HTTPException(status_code=503, detail="SentenceTransformer model is not downloaded yet. Please wait.")
     try:
-        model = _get_deep_scan_model(model_name)
         embeddings = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: model.encode(
-                [content1, content2],
+                [content1[:4000], content2[:4000]],
                 convert_to_numpy=True,
                 normalize_embeddings=True,
             )
         )
-        similarity = _cosine_similarity(embeddings[0], embeddings[1])
-    except FileNotFoundError:
-        raise HTTPException(status_code=503, detail="SentenceTransformer model is not downloaded yet. Please wait.")
+        raw_similarity = _cosine_similarity(embeddings[0], embeddings[1])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Deep scan failed: {str(e)}")
 
-    similarity_pct = round(similarity * 100, 2)
-    verdict = "CONFIRMED_PLAGIARISM" if similarity > 0.85 else "LIKELY_ORIGINAL"
+    calibrated = calibrate_semantic(raw_similarity, model_name)
 
     return {
-        "ai_similarity": similarity_pct,
+        "ai_similarity": round(calibrated * 100, 2),
+        "ai_similarity_raw": round(raw_similarity * 100, 2),
         "model_used": model_name,
-        "method": "cosine_similarity",
-        "verdict": verdict,
+        "method": "cosine_similarity_calibrated",
+        "verdict": verdict_for(calibrated),
         "file1": req.file1_path,
         "file2": req.file2_path,
     }
@@ -148,7 +151,7 @@ class BulkDeepScanRequest(BaseModel):
 
 @router.post("/api/plagiarism/deep-scan-bulk", dependencies=[Depends(require_role())])
 async def deep_scan_bulk(req: BulkDeepScanRequest):
-    """FAISS bulk semantic scan: top-5 cross-project matches for every file of a project."""
+    """Postgres 2-Step Rescoring bulk semantic scan: top-5 cross-project matches for every file of a project."""
     project_id = (req.project_id or "").strip()
     if not project_id:
         raise HTTPException(
@@ -165,19 +168,31 @@ async def deep_scan_bulk(req: BulkDeepScanRequest):
 
     vstore = get_vstore()
 
-    # Embedding generation is decoupled from the upload stream, so a project
-    # that was never deep-indexed holds ZERO vectors and search_bulk() would
-    # silently return an empty result. Build the index on demand first so Deep
-    # Scan always works, even when the user never indexed manually.
+    # Embedding generation is decoupled from the upload stream, so projects
+    # that were never deep-indexed hold ZERO vectors. Build the index on demand
+    # for the target project (and any unindexed recent corpus projects) so Deep
+    # Scan always works even when the user never indexed manually.
+    def _ensure_indexed():
+        pids = [project_id]
+        for proj in db.get_all_projects(limit=50):
+            pid = proj.get("id") or proj.get("name")
+            if pid and pid not in pids:
+                pids.append(pid)
+        for pid in pids:
+            try:
+                if vstore.needs_reindex(pid):
+                    print(
+                        f"[Postgres Vector] Project '{pid}' has missing or stale vectors; "
+                        f"re-indexing before bulk deep scan..."
+                    )
+                    _index_project_embeddings(vstore, db, pid)
+            except Exception as e:
+                if pid == project_id:
+                    raise
+                print(f"[Postgres Vector] Skipping corpus project '{pid}' (indexing failed: {e})")
+
     try:
-        if vstore.count_project_vectors(project_id) == 0:
-            print(
-                f"[FAISS] Project '{project_id}' has no vectors yet; "
-                f"auto-indexing before bulk deep scan..."
-            )
-            await asyncio.get_event_loop().run_in_executor(
-                None, lambda: _index_project_embeddings(vstore, db, project_id)
-            )
+        await asyncio.get_event_loop().run_in_executor(None, _ensure_indexed)
     except Exception as e:
         raise HTTPException(
             status_code=500,

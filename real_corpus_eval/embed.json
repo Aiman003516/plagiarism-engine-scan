@@ -1,0 +1,66 @@
+{
+  "realeval_mizan_monorepo": {
+    "vectors": {
+      "code": 469,
+      "text": 53
+    },
+    "seconds": 948.8,
+    "error": null
+  },
+  "realeval_3d_react_website": {
+    "vectors": {
+      "code": 15,
+      "text": 0
+    },
+    "seconds": 31.6,
+    "error": null
+  },
+  "realeval_accounting": {
+    "vectors": {
+      "code": 61,
+      "text": 2
+    },
+    "seconds": 122.8,
+    "error": null
+  },
+  "realeval_ai_engine": {
+    "vectors": {
+      "code": 134,
+      "text": 53
+    },
+    "seconds": 436.4,
+    "error": null
+  },
+  "realeval_ai_surveillance_system": {
+    "vectors": {
+      "code": 2,
+      "text": 1
+    },
+    "seconds": 5.0,
+    "error": null
+  },
+  "realeval_application_of_tinyml": {
+    "vectors": {
+      "code": 0,
+      "text": 52
+    },
+    "seconds": 223.2,
+    "error": null
+  },
+  "realeval_c_accounting_app_mizan": {
+    "vectors": {
+      "code": 36,
+      "text": 0
+    },
+    "seconds": 32.9,
+    "error": null
+  },
+  "realeval_crystal_helix_erp": {
+    "vectors": {
+      "code": 471,
+      "text": 4
+    },
+    "seconds": 666.9,
+    "error": null
+  }
+}

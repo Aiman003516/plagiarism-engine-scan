@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   ShieldCheck,
   RefreshCw,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -221,6 +222,12 @@ export default function Dashboard() {
           hint: `${shareOf(flagged)}% ${t("of_total")}`,
           ratio: shareOf(flagged),
         },
+        {
+          icon: BarChart3,
+          label: "Avg Fusion Score",
+          value: stats.average_fusion_score !== undefined ? `${stats.average_fusion_score}%` : "â€”",
+          tone: "amber",
+        },
       ]
     : [];
 
@@ -249,6 +256,27 @@ export default function Dashboard() {
           </>
         )}
       </div>
+
+      {/* Verdicts Distribution */}
+      {stats?.verdicts_distribution && (
+        <section className="glass-panel mt-6 p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+          <h2 className="text-sm font-semibold text-text-muted mb-3 uppercase tracking-wider">
+            Scan Verdicts Distribution
+          </h2>
+          <div className="flex h-6 rounded-full overflow-hidden">
+            <div className="bg-green-500 hover:opacity-80 transition-opacity" style={{ flex: stats.verdicts_distribution.SAFE || 0 }} title={`SAFE: ${stats.verdicts_distribution.SAFE || 0}`} />
+            <div className="bg-yellow-500 hover:opacity-80 transition-opacity" style={{ flex: stats.verdicts_distribution.LOW || 0 }} title={`LOW: ${stats.verdicts_distribution.LOW || 0}`} />
+            <div className="bg-orange-500 hover:opacity-80 transition-opacity" style={{ flex: stats.verdicts_distribution.HIGH || 0 }} title={`HIGH: ${stats.verdicts_distribution.HIGH || 0}`} />
+            <div className="bg-red-600 hover:opacity-80 transition-opacity" style={{ flex: (stats.verdicts_distribution.CRITICAL || 0) + (stats.verdicts_distribution.FLAGGED || 0) }} title={`CRITICAL: ${(stats.verdicts_distribution.CRITICAL || 0) + (stats.verdicts_distribution.FLAGGED || 0)}`} />
+          </div>
+          <div className="flex gap-4 mt-3 text-xs text-text-muted justify-between sm:justify-start">
+            <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-green-500"></div> SAFE ({stats.verdicts_distribution.SAFE || 0})</span>
+            <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div> LOW ({stats.verdicts_distribution.LOW || 0})</span>
+            <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-orange-500"></div> HIGH ({stats.verdicts_distribution.HIGH || 0})</span>
+            <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-red-600"></div> CRITICAL ({(stats.verdicts_distribution.CRITICAL || 0) + (stats.verdicts_distribution.FLAGGED || 0)})</span>
+          </div>
+        </section>
+      )}
 
       <section className="glass-panel mt-6 p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
         <h2 className="text-lg font-semibold text-text-main mb-4 flex items-center gap-2">
