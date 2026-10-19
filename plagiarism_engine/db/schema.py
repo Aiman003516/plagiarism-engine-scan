@@ -81,6 +81,7 @@ class SchemaMixin:
                 CREATE INDEX IF NOT EXISTS idx_project_files_project_id ON project_files(project_id);
                 CREATE INDEX IF NOT EXISTS idx_fp_hash ON fingerprint_index(fingerprint_hash);
                 CREATE INDEX IF NOT EXISTS idx_fp_project ON fingerprint_index(project_id);
+                CREATE INDEX IF NOT EXISTS idx_fp_composite ON fingerprint_index(fingerprint_hash, file_type, project_id);
 
                 CREATE TABLE IF NOT EXISTS users (
                     id VARCHAR(255) PRIMARY KEY,
@@ -143,6 +144,13 @@ class SchemaMixin:
                     "ALTER TABLE scan_reports ADD COLUMN IF NOT EXISTS alpha FLOAT;",
                     "ALTER TABLE scan_reports ADD COLUMN IF NOT EXISTS verdict VARCHAR(50);",
                     "CREATE INDEX IF NOT EXISTS idx_pf_embedded ON project_files (file_type, embedding_model) WHERE embedding_binary IS NOT NULL;",
+                    "CREATE INDEX IF NOT EXISTS idx_fp_composite ON fingerprint_index(fingerprint_hash, file_type, project_id);",
+                    "CREATE INDEX IF NOT EXISTS idx_scan_reports_target_id ON scan_reports(target_id);",
+                    "CREATE INDEX IF NOT EXISTS idx_students_team_id ON students(team_id);",
+                    "CREATE INDEX IF NOT EXISTS idx_students_college_id ON students(college_id);",
+                    "CREATE INDEX IF NOT EXISTS idx_projects_team_id ON projects(team_id);",
+                    "CREATE INDEX IF NOT EXISTS idx_projects_student_id ON projects(student_id);",
+                    "CREATE INDEX IF NOT EXISTS idx_users_college_id ON users(college_id);",
                 ]
                 for stmt in alter_statements:
                     try:
@@ -238,6 +246,7 @@ class SchemaMixin:
                 CREATE INDEX IF NOT EXISTS idx_project_files_project_id ON project_files(project_id);
                 CREATE INDEX IF NOT EXISTS idx_fp_hash ON fingerprint_index(fingerprint_hash);
                 CREATE INDEX IF NOT EXISTS idx_fp_project ON fingerprint_index(project_id);
+                CREATE INDEX IF NOT EXISTS idx_fp_composite ON fingerprint_index(fingerprint_hash, file_type, project_id);
 
                 CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY,
@@ -299,6 +308,7 @@ class SchemaMixin:
                     "ALTER TABLE scan_reports ADD COLUMN alpha REAL;",
                     "ALTER TABLE scan_reports ADD COLUMN verdict TEXT;",
                     "CREATE INDEX IF NOT EXISTS idx_pf_embedded ON project_files (file_type, embedding_model);",
+                    "CREATE INDEX IF NOT EXISTS idx_fp_composite ON fingerprint_index (fingerprint_hash, file_type, project_id);",
                 ]
                 for stmt in alter_statements:
                     try:

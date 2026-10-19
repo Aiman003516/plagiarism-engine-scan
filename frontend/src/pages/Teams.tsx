@@ -1,35 +1,19 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Users, RefreshCw, Search, Trash2, Plus, X, Loader2 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { teamsApi, TeamData } from "../lib/api";
+import { useTeamsCache } from "../lib/useTeamsCache";
 
 export default function Teams() {
   const { t } = useTranslation();
-  const [teams, setTeams] = useState<TeamData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { teams, loading, error, refresh: load } = useTeamsCache();
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [activeTeam, setActiveTeam] = useState<TeamData | null>(null);
   const [enrollment, setEnrollment] = useState("");
   const [saving, setSaving] = useState(false);
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      const res = await teamsApi.getAll();
-      setTeams(res.teams || []);
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to load teams");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
 
   const openTeam = async (team: TeamData) => {
     try {

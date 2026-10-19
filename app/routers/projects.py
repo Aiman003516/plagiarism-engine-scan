@@ -15,9 +15,10 @@ router = APIRouter(tags=["projects"])
 
 
 @router.get("/api/plagiarism/projects", dependencies=[Depends(require_role())])
-async def list_projects():
+async def list_projects(limit: int = 1000, page: int = 1):
     db = get_db()
-    projects = db.get_all_projects()
+    loop = asyncio.get_running_loop()
+    projects = await loop.run_in_executor(None, lambda: db.get_all_projects(page=page, limit=limit))
 
     # The Faculty Approval UI drives off `status`, and students may only see
     # their own submissions via `student_id`. Guarantee both keys exist on every
@@ -46,55 +47,64 @@ class ProjectUpdate(BaseModel):
 @router.put("/api/plagiarism/projects/{project_id}", dependencies=[Depends(require_role())])
 async def update_project(project_id: str, payload: ProjectUpdate):
     db = get_db()
-    existing = db.get_project_by_id(project_id)
+    loop = asyncio.get_running_loop()
+    existing = await loop.run_in_executor(None, lambda: db.get_project_by_id(project_id))
     if not existing:
         raise HTTPException(status_code=404, detail="Project not found")
-    db.update_project(
-        project_id,
-        title=payload.title,
-        abstract=payload.abstract,
-        team_id=payload.team_id,
-        department=payload.department,
-        year=payload.year,
-        university=payload.university,
-        status=payload.status,
-    )
-    return db.get_project_by_id(project_id)
+
+    def _update():
+        db.update_project(
+            project_id,
+            title=payload.title,
+            abstract=payload.abstract,
+            team_id=payload.team_id,
+            department=payload.department,
+            year=payload.year,
+            university=payload.university,
+            status=payload.status,
+        )
+        return db.get_project_by_id(project_id)
+
+    updated = await loop.run_in_executor(None, _update)
+    return updated
 
 
 @router.post("/api/plagiarism/projects/{project_id}/approve", dependencies=[Depends(require_role("ministry_admin", "college_admin", "faculty"))])
 async def approve_project(project_id: str):
     """Faculty approval workflow: flip a pending project's status to 'approved'."""
     db = get_db()
-    conn = db._get_connection()
-    try:
-        cursor = conn.cursor()
-        # psycopg2 and sqlite3 use different parameter placeholders.
-        placeholder = "%s" if db.mode == "postgresql" else "?"
-        cursor.execute(f"UPDATE projects SET status = 'approved' WHERE id = {placeholder}", (project_id,))
-        if cursor.rowcount == 0:
-            conn.rollback()
-            raise HTTPException(404, "Project not found")
-        conn.commit()
-    finally:
-        conn.close()
+    loop = asyncio.get_running_loop()
+
+    def _approve():
+        conn = db._get_connection()
+        try:
+            cursor = conn.cursor()
+            placeholder = "%s" if db.mode == "postgresql" else "?"
+            cursor.execute(f"UPDATE projects SET status = 'approved' WHERE id = {placeholder}", (project_id,))
+            if cursor.rowcount == 0:
+                conn.rollback()
+                raise HTTPException(404, "Project not found")
+            conn.commit()
+        finally:
+            conn.close()
+
+    await loop.run_in_executor(None, _approve)
     return {"detail": "Project approved successfully"}
 
 
 @router.delete("/api/plagiarism/projects/{project_id}", dependencies=[Depends(require_role())])
 async def delete_project(project_id: str):
     db = get_db()
-    existing = db.get_project_by_id(project_id)
+    loop = asyncio.get_running_loop()
+    existing = await loop.run_in_executor(None, lambda: db.get_project_by_id(project_id))
     if not existing:
         raise HTTPException(status_code=404, detail="Project not found")
-    db.delete_project(project_id)
+    await loop.run_in_executor(None, lambda: db.delete_project(project_id))
 
     # Clean up the project's embeddings from the Postgres vector store as well.
-    # Runs in an executor so index I/O never blocks the event loop; a failure
-    # here must not fail the (already completed) DB deletion.
     try:
         vstore = get_vstore()
-        await asyncio.get_event_loop().run_in_executor(
+        await loop.run_in_executor(
             None, lambda: vstore.delete_project(project_id)
         )
     except Exception as e:
@@ -104,12 +114,15 @@ async def delete_project(project_id: str):
 
 
 @router.get("/api/plagiarism/projects/{project_id}/files", dependencies=[Depends(require_role())])
-async def list_project_files(project_id: str):
+async def list_project_files(project_id: str, include_content: bool = False):
     db = get_db()
-    existing = db.get_project_by_id(project_id)
+    loop = asyncio.get_running_loop()
+    existing = await loop.run_in_executor(None, lambda: db.get_project_by_id(project_id))
     if not existing:
         raise HTTPException(status_code=404, detail="Project not found")
-    files = db.get_project_files(project_id)
+    files = await loop.run_in_executor(
+        None, lambda: db.get_project_files(project_id, include_content=include_content)
+    )
     return {"files": files}
 
 @router.post("/api/plagiarism/projects/{project_id}/index-embeddings")
@@ -153,5 +166,6 @@ async def index_project_embeddings(project_id: str, user=Depends(require_role("m
 async def check_projects(names: str):
     name_list = [n.strip() for n in names.split(",") if n.strip()]
     db = get_db()
-    existing = db.check_project_exists(name_list)
+    loop = asyncio.get_running_loop()
+    existing = await loop.run_in_executor(None, lambda: db.check_project_exists(name_list))
     return existing

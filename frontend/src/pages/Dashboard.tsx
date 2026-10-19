@@ -15,9 +15,28 @@ import { useTranslation } from "react-i18next";
 import { dashboardApi, DashboardStats } from "../lib/api";
 import { cn } from "../lib/utils";
 
+const DASHBOARD_CACHE_KEY = "cached_dashboard_stats";
+
 // Stale-While-Revalidate cache: keeps the last known stats across mounts so
 // returning to the Dashboard renders instantly instead of showing a spinner.
 let cachedStats: DashboardStats | null = null;
+
+function getInitialStats(): DashboardStats | null {
+  if (cachedStats) return cachedStats;
+  try {
+    const raw = localStorage.getItem(DASHBOARD_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        cachedStats = parsed;
+        return parsed;
+      }
+    }
+  } catch {
+    // Ignore corrupt storage
+  }
+  return null;
+}
 
 /**
  * Semantic tones for the KPI cards — the multi-color palette that replaces the
@@ -137,8 +156,8 @@ function similarityText(score: number): string {
 
 export default function Dashboard() {
   const { t } = useTranslation();
-  const [stats, setStats] = useState<DashboardStats | null>(cachedStats);
-  const [loading, setLoading] = useState(!cachedStats); // Only load if no cache
+  const [stats, setStats] = useState<DashboardStats | null>(getInitialStats);
+  const [loading, setLoading] = useState(!getInitialStats()); // Only load if no cache
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
@@ -147,6 +166,11 @@ export default function Dashboard() {
     try {
       const data = await dashboardApi.stats();
       cachedStats = data;
+      try {
+        localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(data));
+      } catch {
+        // Ignore storage quota
+      }
       setStats(data);
     } catch (e: any) {
       setError(e?.message || "Failed to load stats");
@@ -173,12 +197,11 @@ export default function Dashboard() {
     );
   }
 
-  // "Safe" is derived on the client: the stats endpoint reports the project
-  // total and the flagged count only, so clean = total − flagged.
+  // Distinct project counts: uses safe_projects directly from backend
   const totalProjects = stats?.total_projects ?? 0;
   const flagged = stats?.flagged_count ?? 0;
-  const safe = Math.max(0, totalProjects - flagged);
-  const shareOf = (n: number) => (totalProjects > 0 ? Math.round((n / totalProjects) * 100) : 0);
+  const safe = stats?.safe_projects ?? Math.max(0, totalProjects - flagged);
+  const shareOf = (n: number) => (totalProjects > 0 ? Math.min(100, Math.max(0, Math.round((n / totalProjects) * 100))) : 0);
 
   const statsCards: StatCardData[] = stats
     ? [

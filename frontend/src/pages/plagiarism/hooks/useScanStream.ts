@@ -82,6 +82,11 @@ export async function readZipScanStream(
       if (done) break;
     }
     if (!completed) {
+      const store = useScanStore.getState();
+      if (store.streamToken && store.activeProjectId) {
+        useScanStore.getState().setAbortController(null);
+        return null;
+      }
       throw new Error("The ZIP scan stream ended before a completion event was received. Please retry.");
     }
   } finally {
@@ -98,23 +103,22 @@ export async function readZipScanStream(
 export function useScanStreamReconnection() {
   const { t } = useTranslation();
 
+  const isScanning = useScanStore((s) => s.isScanning);
+  const activeProjectId = useScanStore((s) => s.activeProjectId);
+  const streamToken = useScanStore((s) => s.streamToken);
+  const abortController = useScanStore((s) => s.abortController);
+
   // --- Resume an in-flight scan after navigating away or reloading -------------
   useEffect(() => {
-    const {
-      isScanning: scanActive,
-      activeProjectId,
-      streamToken,
-      streamLogCount,
-      abortController,
-    } = useScanStore.getState();
-    if (!scanActive || !activeProjectId || !streamToken || abortController) return;
+    if (!isScanning || !activeProjectId || !streamToken || abortController) return;
 
     useScanStore.getState().reconnectScan(activeProjectId);
 
     // `streamLogCount` tells the backend which lines we already hold, so the replay
     // tops the terminal up instead of duplicating every line on each navigate-back.
+    const cursor = useScanStore.getState().streamLogCount;
     const source = new EventSource(
-      scanStreamReconnectUrl(activeProjectId, streamToken, streamLogCount)
+      scanStreamReconnectUrl(activeProjectId, streamToken, cursor)
     );
     let settled = false;
 
@@ -142,7 +146,7 @@ export function useScanStreamReconnection() {
         } else {
           useScanStore.setState({ isScanning: false, isReconnecting: false, streamToken: null });
         }
-        toast.success(t("intake_progress_title") + " ✓");
+        toast.success((t("intake_progress_title") || "Scan completed") + ` for ${activeProjectId} ✓`);
       } else if (event.type === "error") {
         closeStream();
         const message = event.message || "The resumed scan failed.";
@@ -160,7 +164,7 @@ export function useScanStreamReconnection() {
       if (settled) return;
       closeStream();
       useScanStore.getState().markScanInterrupted(
-        "The live scan stream could not be resumed. Check Scan History for the final report."
+        "The live scan stream completed or expired. Check Scan History for the final report."
       );
     };
 
@@ -169,8 +173,7 @@ export function useScanStreamReconnection() {
       // deliberately survives, so the next mount (or a reload) can resume it again.
       closeStream();
     };
-    // Runs once on mount: the decision is made from the persisted store snapshot.
-  }, [t]);
+  }, [isScanning, activeProjectId, streamToken, abortController, t]);
 }
 
 export const handleStreamSession = (session: ScanStreamSession) => {

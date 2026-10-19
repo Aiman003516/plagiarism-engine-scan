@@ -764,6 +764,580 @@ def test_mixed_language_alpha():
     assert res["language"] == "mixed"
 
 
+# ===========================================================================
+# 8. Round 3 / Phase 1: central file-scope policy
+# ===========================================================================
+
+def test_file_policy_classification():
+    from plagiarism_engine.file_policy import is_scannable
+
+    rejected = {
+        "package.json": "config", "frontend/package-lock.json": "config", "pyproject.toml": "config",
+        "app/config.yaml": "config", "docker-compose.yml": "config", ".env.example": "config",
+        "android/app/src/main/AndroidManifest.xml": "config", "web/manifest.json": "config",
+        "vite.config.ts": "config", "tailwind.config.js": "config", "requirements.txt": "config",
+        "README.md": "config", "src/vite-env.d.ts": "template", "backend/manage.py": "template",
+        "lib/models/user.g.dart": "template", "static/app.min.js": "template", "dist/app.js": "ignored_dir",
+        "apps/android_build_log.txt.log": "data_or_log", "data/train.csv": "data_or_log",
+        "results.tsv": "data_or_log", "assets/logo.png": "binary", "Makefile": "config",
+        "node_modules/react/index.js": "ignored_dir", ".git/config": "ignored_dir",
+        "LICENSE": "config", "notes.unknownext": "unsupported",
+    }
+    for path, reason in rejected.items():
+        ok, got = is_scannable(path)
+        assert not ok and got == reason, (path, ok, got, reason)
+
+    accepted = ["main.py", "src/App.tsx", "src/index.css", "templates/index.html", "lib/main.dart",
+                "packages/core/core_data/lib/src/repo.dart", "thesis.pdf", "essay.docx", "chapter1.md",
+                "notes.txt", "db/schema.sql", "Program.cs",
+                # 'models/' is a normal source folder (Django / Flutter / MVC) and must be scanned
+                "app/models/user.py", "lib/models/invoice.dart"]
+    for path in accepted:
+        ok, got = is_scannable(path)
+        assert ok, (path, got)
+    assert is_scannable("models/bge-m3/vocab.txt") == (False, "data_or_log")
+    assert is_scannable("models/bge-m3/model.safetensors") == (False, "binary")
+
+    # Size cap: a 3 MB "source" file is generated/data, a 3 MB PDF is a normal thesis.
+    assert is_scannable("big.py", 3 * 1024 * 1024) == (False, "too_large")
+    assert is_scannable("thesis.pdf", 3 * 1024 * 1024) == (True, "")
+
+
+def test_walk_stops_completely_at_total_size_limit():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        body = "\n".join(f"def f{i}(x):\n    return x * {i}" for i in range(40))  # ~1 KB, > min_lines
+        for d in ("a", "b", "c", "d"):
+            (root / d).mkdir()
+            for i in range(3):
+                (root / d / f"m{i}.py").write_bytes(body.encode("utf-8"))
+        (root / "a" / "package.json").write_bytes(b'{"name": "x"}')
+        size = len(body.encode("utf-8"))
+        excluded = []
+        files = FileExtractor.scan_project_directory(root, max_total_bytes=size * 4 + 10, excluded_out=excluded)
+        # The cap admits exactly 4 files; the walk must stop entirely (previously it only left the
+        # current directory's loop and kept reading the remaining directories).
+        assert len(files) == 4, [f["relative_path"] for f in files]
+        assert all(f["relative_path"].endswith(".py") for f in files)
+        assert not any("package.json" in f["relative_path"] for f in files)
+
+
+def test_upload_excludes_config_and_logs_end_to_end():
+    from app.main import app
+    from app.dependencies import _create_access_token
+    from app.state import get_db
+
+    client = TestClient(app)
+    token = _create_access_token("test_admin", "admin@ministry.gov", "ministry_admin", False)
+    headers = {"Authorization": f"Bearer {token}"}
+    proj = f"pytest_policy_{uuid.uuid4().hex[:6]}"
+    db = get_db()
+    code = "\n".join(f"def handler_{i}(req):\n    return {{'ok': {i}}}" for i in range(30))
+    try:
+        res = client.post(
+            "/api/plagiarism/upload-scan",
+            data={"project_name": proj, "scan_type": "Direct Upload Project Scan"},
+            files=[
+                ("files", ("main.py", code.encode("utf-8"), "text/x-python")),
+                ("files", ("package.json", b'{"name": "demo", "version": "1.0.0"}', "application/json")),
+                ("files", ("build.log", b"BUILD SUCCESSFUL in 3s\n" * 50, "text/plain")),
+                ("files", ("data.csv", b"a,b,c\n1,2,3\n" * 50, "text/csv")),
+                ("files", ("vite.config.ts", b"export default defineConfig({ plugins: [] })", "text/plain")),
+            ],
+            headers=headers,
+        )
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["total_files"] == 1, body
+        assert body["excluded_files_count"] == 4, body
+        reasons = {e["path"]: e["reason"] for e in body["excluded_files"]}
+        assert reasons == {"package.json": "config", "build.log": "data_or_log",
+                           "data.csv": "data_or_log", "vite.config.ts": "config"}, reasons
+        stored = sorted(f["relative_path"] for f in db.get_project_files(proj))
+        assert stored == ["main.py"], stored
+        assert set(db.get_project_fingerprints(proj).keys()) <= {"main.py"}
+
+        # An upload with ONLY excluded files is a clear 400, not a 500 / empty project.
+        bad = client.post(
+            "/api/plagiarism/upload-scan",
+            data={"project_name": proj + "_cfg", "scan_type": "Direct Upload Project Scan"},
+            files=[("files", ("package.json", b'{"name": "demo"}', "application/json"))],
+            headers=headers,
+        )
+        assert bad.status_code == 400, bad.text
+        assert "No scannable files" in bad.json()["detail"]
+    finally:
+        db.delete_project(proj)
+        db.delete_project(proj + "_cfg")
+
+
+# ===========================================================================
+# 9. Round 3 / Phase 2: scoring redesign & evidence gates
+# ===========================================================================
+
+def test_code_gate():
+    winnow = WinnowingEngine(k=15, w=5)
+    code_a = "\n".join([f"def calculate_total_{i}(x, y):\n    return (x + y) * {i}" for i in range(25)])
+    code_b = "\n".join([f"class DataRecord_{i}:\n    NAME = 'record_{i}'\n    ACTIVE = True" for i in range(25)])
+
+    # 1. Zero shared fingerprints with high semantic score (0.95)
+    # Code is never flagged on meaning alone: capped at LOW (<= 50.0), never HIGH or CRITICAL
+    res_zero = compute_fusion_score(code_a, code_b, 0.95, "code", winnow, filename="algo.py")
+    assert res_zero["shared_fingerprints"] == 0, res_zero
+    assert res_zero["lexical_evidence"] is False
+    assert res_zero["fusion_score"] <= 50.0, res_zero
+    assert res_zero["verdict"] in ("SAFE", "LOW"), res_zero
+    assert res_zero["verdict"] not in ("HIGH", "CRITICAL"), res_zero
+
+    # 2. Restructured code with >= 3 shared fingerprints and high semantic score (0.75)
+    # Reaches HIGH via restructured code boost
+    code_c = "\n".join([f"def calculate_total_{i}(x, y):\n    return (x + y) * {i}" for i in range(6)] +
+                       [f"def mutated_zeta_{i}(val):\n    res = val * {i}\n    return res" for i in range(20)])
+    res_shared = compute_fusion_score(code_a, code_c, 0.75, "code", winnow, filename="algo.py")
+    assert res_shared["shared_fingerprints"] >= 3, res_shared
+    assert res_shared["lexical_evidence"] is True
+    assert res_shared["fusion_score"] > 50.0, res_shared
+    assert res_shared["verdict"] in ("HIGH", "CRITICAL"), res_shared
+    assert res_shared["rule"] == "code_restructured_boost"
+
+
+def test_text_cap():
+    winnow = WinnowingEngine(k=10, w=4)
+    text_a = " ".join([f"quantum_computing_concept_{i}" for i in range(60)])
+    text_b = " ".join([f"ancient_philosophy_history_{j}" for j in range(60)])
+
+    # Academic PDF with zero lexical overlap and 1.0 semantic score (uncapped 0.80 -> would be CRITICAL)
+    res_pdf = compute_fusion_score(text_a, text_b, 1.0, "text", winnow, filename="thesis.pdf")
+    assert res_pdf["shared_fingerprints"] == 0, res_pdf
+    assert res_pdf["fusion_score"] <= 75.0, res_pdf
+    assert res_pdf["verdict"] != "CRITICAL", res_pdf
+    assert res_pdf["verdict"] == "HIGH", res_pdf
+    assert "zero_fp_capped_high" in res_pdf["rule"]
+
+    # English text with zero lexical overlap and high semantic score (0.98 -> 0.70 * 0.98 = 68.6%)
+    res_txt = compute_fusion_score(text_a, text_b, 0.98, "text", winnow, filename="essay.txt")
+    assert res_txt["shared_fingerprints"] == 0, res_txt
+    assert res_txt["fusion_score"] <= 75.0, res_txt
+    assert res_txt["verdict"] != "CRITICAL", res_txt
+
+
+def test_embedded_copy_production_params():
+    import random
+
+    # Production parameters k=50, w=10
+    snippet = '''def embedded_algorithm_suite(data_stream, threshold_limit, factor):
+    cleaned = [v for v in data_stream if v is not None and v > 0]
+    total_acc = 0
+    transformed_records = []
+    for item_idx, value in enumerate(cleaned):
+        if value >= threshold_limit:
+            total_acc += value * factor
+            transformed_records.append((item_idx, total_acc, "HIGH"))
+        else:
+            total_acc -= value // 2
+            transformed_records.append((item_idx, total_acc, "LOW"))
+    matrix = [[(i + 1) * (j + 1) for j in range(min(5, len(cleaned)))] for i in range(min(5, len(cleaned)))]
+    return total_acc, transformed_records, matrix
+'''
+    statements = [
+        "    total = sum(x * x for x in items if x % 2 == 0)",
+        "    while count < limit:\n        count += step",
+        "    try:\n        value = int(raw)\n    except ValueError:\n        value = -1",
+        "    with open(path, 'r', encoding='utf-8') as fh:\n        lines = fh.readlines()",
+        "    result = [a + b for a, b in zip(left, right)]",
+        "    if flag and not other:\n        return None",
+        "    mapping = dict(sorted(pairs, key=lambda p: p[1]))",
+        "    for i in range(len(data) - 1, -1, -2):\n        data[i] = data[i] ** 3",
+        "    assert isinstance(obj, (list, tuple)), 'bad type'",
+        "    text = ' '.join(reversed(words)).upper().strip()",
+    ]
+    rng = random.Random(42)
+    lines = []
+    for f in range(60):
+        lines.append(f"def generated_{f}(items, limit, step, raw, path, left, right, flag, other, pairs, data, obj, words):")
+        lines.extend(rng.sample(statements, k=rng.randint(4, 7)))
+        lines.append("    return locals()\n")
+        if f == 30:
+            lines.append(snippet)
+    big = "\n".join(lines)
+
+    winnow_prod = WinnowingEngine(k=50, w=10)
+    res = compute_fusion_score(snippet, big, 0.50, "code", winnow_prod, filename="module.py")
+    assert res["embedded_copy"] is True, res
+    assert res["containment_score"] >= 80.0, res
+    assert res["winnowing_score"] < 50.0, res
+    assert res["lexical_evidence"] is True
+    assert res["fusion_score"] >= 65.0, res
+    assert res["verdict"] in ("HIGH", "CRITICAL"), res
+
+
+def test_common_fp_suppression():
+    from app.main import app
+    from app.dependencies import _create_access_token
+    from app.state import get_db
+
+    client = TestClient(app)
+    token = _create_access_token("test_admin", "admin@ministry.gov", "ministry_admin", False)
+    headers = {"Authorization": f"Bearer {token}"}
+    tag = uuid.uuid4().hex[:6]
+    db = get_db()
+
+    # Template boilerplate code that will be present in 6 projects
+    template_code = "\n\n".join([
+        f"def boilerplate_handler_{i}(request, response, context):\n"
+        f"    payload = {{'handler_id': {i}, 'status': 'initialized', 'active': True}}\n"
+        f"    headers = {{'X-Handler-Version': '1.0.{i}', 'Content-Type': 'application/json'}}\n"
+        f"    return payload, headers"
+        for i in range(15)
+    ])
+
+    projects = [f"pytest_tmpl_{tag}_{i}" for i in range(6)]
+
+    try:
+        # Upload 6 projects sharing the exact same boilerplate file
+        for idx, p_name in enumerate(projects):
+            files = [("boilerplate.py", template_code, "text/x-python")]
+            if idx == 5:
+                files.append(("unique_impl.py", "def unique_custom_function():\n    return 'secret'\n", "text/x-python"))
+            res = client.post(
+                "/api/plagiarism/upload-scan",
+                data={"project_name": p_name, "scan_type": "Direct Upload Project Scan"},
+                files=[("files", (fn, body.encode("utf-8"), mime)) for fn, body, mime in files],
+                headers=headers,
+            )
+            assert res.status_code == 200, res.text
+
+        # Verify get_common_fingerprints detects the template fingerprints
+        common_fps = db.get_common_fingerprints(max_projects=5)
+        assert len(common_fps) > 0, "Template fingerprints should be identified as common across >= 6 projects"
+
+        # Scan project 5 against the repository
+        scan = client.post(
+            "/api/plagiarism/scan",
+            json={"scan_type": "Saved Project Scan", "target": projects[5]},
+            headers=headers,
+        )
+        assert scan.status_code == 200, scan.text
+        comps = scan.json()["comparisons"]
+
+        # The boilerplate template must NOT be flagged as plagiarized against the other 5 projects
+        template_hits = [c for c in comps if c.get("file1") == "boilerplate.py" or c.get("file2") == "boilerplate.py"]
+        assert len(template_hits) == 0, f"Common template boilerplate was flagged: {template_hits}"
+
+    finally:
+        for p_name in projects:
+            try:
+                db.delete_project(p_name)
+            except Exception:
+                pass
+
+
+def test_small_file_exact_code_detected():
+    from app.main import app
+    from app.dependencies import _create_access_token
+    from app.state import get_db
+
+    client = TestClient(app)
+    token = _create_access_token("test_admin", "admin@ministry.gov", "ministry_admin", False)
+    headers = {"Authorization": f"Bearer {token}"}
+    tag = uuid.uuid4().hex[:6]
+    db = get_db()
+
+    proj_a = f"pytest_small_a_{tag}"
+    proj_b = f"pytest_small_b_{tag}"
+
+    # Small code file (< 50 tokens, produces exactly 1 fingerprint under production k=50)
+    small_code = "def authenticate_user(token):\n    return token.startswith('bearer_')\n"
+
+    try:
+        res_a = client.post(
+            "/api/plagiarism/upload-scan",
+            data={"project_name": proj_a, "scan_type": "Direct Upload Project Scan"},
+            files=[("files", ("auth_helper.py", small_code.encode("utf-8"), "text/x-python"))],
+            headers=headers,
+        )
+        assert res_a.status_code == 200, res_a.text
+
+        res_b = client.post(
+            "/api/plagiarism/upload-scan",
+            data={"project_name": proj_b, "scan_type": "Direct Upload Project Scan"},
+            files=[("files", ("auth_helper.py", small_code.encode("utf-8"), "text/x-python"))],
+            headers=headers,
+        )
+        assert res_b.status_code == 200, res_b.text
+
+        scan = client.post(
+            "/api/plagiarism/scan",
+            json={"scan_type": "Saved Project Scan", "target": proj_b},
+            headers=headers,
+        )
+        assert scan.status_code == 200, scan.text
+        comps = scan.json()["comparisons"]
+
+        hit = _best_cmp(comps, proj_a, "auth_helper.py", "auth_helper.py")
+        assert hit is not None, f"Small exact code file was not detected; comparisons={comps}"
+        assert hit["status"] == "CRITICAL", hit
+        assert hit["fusion_score"] == 100.0, hit
+
+    finally:
+        db.delete_project(proj_a)
+        db.delete_project(proj_b)
+
+
+def test_fusion_scorer_default_filename_guess_lexer():
+    winnow = WinnowingEngine(k=15, w=5)
+    code = (
+        "def merge_config_layers(base, override):\n"
+        "    merged = {k: v for k, v in base.items() if v is not None}\n"
+        "    for key, value in override.items():\n"
+        "        if isinstance(value, dict) and isinstance(merged.get(key), dict):\n"
+        "            merged[key] = merge_config_layers(merged[key], value)\n"
+        "    return merged\n"
+    )
+    # Default filename="" triggers Pygments guess_lexer cleanly without crash
+    res = compute_fusion_score(code, code, 0.70, "code", winnow, filename="", filename_b="")
+    assert res["shared_fingerprints"] >= 5, res
+    assert res["fusion_score"] == 88.0, res
+    assert res["verdict"] == "CRITICAL", res
+
+
+def test_containment_elevation_condition():
+    import random
+    snippet = (
+        "def merge_config_layers(base, override):\n"
+        "    merged = {k: v for k, v in base.items() if v is not None}\n"
+        "    for key, value in override.items():\n"
+        "        if isinstance(value, dict) and isinstance(merged.get(key), dict):\n"
+        "            merged[key] = merge_config_layers(merged[key], value)\n"
+        "    return merged\n"
+    )
+    statements = [
+        "    total = sum(x * x for x in items if x % 2 == 0)",
+        "    while count < limit:\n        count += step",
+        "    try:\n        value = int(raw)\n    except ValueError:\n        value = -1",
+        "    with open(path, 'r') as fh:\n        lines = fh.readlines()",
+        "    result = [a + b for a, b in zip(left, right)]",
+        "    if flag and not other:\n        return None",
+        "    mapping = dict(sorted(pairs, key=lambda p: p[1]))",
+        "    for i in range(len(data) - 1, -1, -2):\n        data[i] = data[i] ** 3",
+        "    assert isinstance(obj, (list, tuple)), 'bad type'",
+        "    text = ' '.join(reversed(words)).upper().strip()",
+    ]
+    rng = random.Random(7)
+    lines = []
+    for f in range(24):
+        lines.append(f"def generated_{f}(items, limit, step, raw, path, left, right, flag, other, pairs, data, obj, words):")
+        lines.extend(rng.sample(statements, k=rng.randint(3, 6)))
+        lines.append("    return locals()\n")
+        if f == 12:
+            lines.append(snippet)
+    big = "\n".join(lines)
+
+    winnow = WinnowingEngine(k=15, w=5)
+    res = compute_fusion_score(snippet, big, 0.40, "code", winnow, filename="snippet.py", filename_b="big.py")
+    assert res["embedded_copy"] is True, res
+    assert res["containment_score"] >= 80.0, res
+    assert res["fusion_score"] >= 60.0, res
+
+
+def test_symmetric_small_file_detection():
+    from app.main import app
+    from app.dependencies import _create_access_token
+    from app.state import get_db
+
+    client = TestClient(app)
+    token = _create_access_token("test_admin", "admin@ministry.gov", "ministry_admin", False)
+    headers = {"Authorization": f"Bearer {token}"}
+    tag = uuid.uuid4().hex[:6]
+    db = get_db()
+
+    proj_small = f"pytest_sym_s_{tag}"
+    proj_large = f"pytest_sym_l_{tag}"
+
+    small_code = "def check_signature(sig, key):\n    return sig == key + '_valid'\n"
+    noise_code = "def large_system_routine():\n    # large noise implementation\n    " + "\n    ".join([f"x_{i} = {i} * 10" for i in range(60)]) + "\n    return x_0\n"
+
+    try:
+        res_s = client.post(
+            "/api/plagiarism/upload-scan",
+            data={"project_name": proj_small, "scan_type": "Direct Upload Project Scan"},
+            files=[("files", ("sig_check.py", small_code.encode("utf-8"), "text/x-python"))],
+            headers=headers,
+        )
+        assert res_s.status_code == 200, res_s.text
+
+        res_l = client.post(
+            "/api/plagiarism/upload-scan",
+            data={"project_name": proj_large, "scan_type": "Direct Upload Project Scan"},
+            files=[
+                ("files", ("sig_check.py", small_code.encode("utf-8"), "text/x-python")),
+                ("files", ("routine.py", noise_code.encode("utf-8"), "text/x-python")),
+            ],
+            headers=headers,
+        )
+        assert res_l.status_code == 200, res_l.text
+
+        scan = client.post(
+            "/api/plagiarism/scan",
+            json={"scan_type": "Saved Project Scan", "target": proj_large},
+            headers=headers,
+        )
+        assert scan.status_code == 200, scan.text
+        comps = scan.json()["comparisons"]
+
+        hit = _best_cmp(comps, proj_small, "sig_check.py", "sig_check.py")
+        assert hit is not None, f"Symmetric small file detection failed; comps={comps}"
+        assert hit["status"] == "CRITICAL", hit
+        assert hit["fusion_score"] == 100.0, hit
+
+    finally:
+        db.delete_project(proj_small)
+        db.delete_project(proj_large)
+
+
+def test_compare_endpoints_reject_excluded_files():
+    from app.main import app
+    from app.dependencies import _create_access_token
+
+    client = TestClient(app)
+    token = _create_access_token("test_admin", "admin@ministry.gov", "ministry_admin", False)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    res = client.post(
+        "/api/plagiarism/compare-files",
+        json={
+            "project_a": "any_proj",
+            "file_a": "package-lock.json",
+            "project_b": "other_proj",
+            "file_b": "main.py",
+        },
+        headers=headers,
+    )
+    assert res.status_code == 400, res.text
+    assert "not scannable" in res.json().get("detail", "")
+
+
+def test_incremental_reindex():
+    from app.state import get_db, get_vstore
+    from app.services.embeddings import _index_project_embeddings
+
+    tag = uuid.uuid4().hex[:6]
+    proj_name = f"pytest_incr_{tag}"
+    db = get_db()
+    vstore = get_vstore()
+
+    try:
+        # 1. Create project with 2 files
+        files_init = [
+            {"relative_path": "a.py", "file_type": "code", "content": "def func_a():\n    return 42\n"},
+            {"relative_path": "b.py", "file_type": "code", "content": "def func_b():\n    return 99\n"},
+        ]
+        db.save_project(proj_name, proj_name, files_init)
+
+        # Initially project needs indexing
+        assert vstore.needs_reindex(proj_name) is True
+        plan = vstore.get_reindex_plan(proj_name)
+        assert len(plan["missing"]) == 2
+        assert len(plan["valid"]) == 0
+
+        # Index the project
+        res1 = _index_project_embeddings(vstore, db, proj_name)
+        assert res1["code"] == 2
+        assert vstore.needs_reindex(proj_name) is False
+
+        # 2. Add a 3rd file without touching a.py and b.py
+        file_c = {"relative_path": "c.py", "file_type": "code", "content": "def func_c():\n    return 123\n"}
+        db.save_project(proj_name, proj_name, files_init + [file_c])
+
+        # Now project needs reindex only for the new file
+        assert vstore.needs_reindex(proj_name) is True
+        plan2 = vstore.get_reindex_plan(proj_name)
+        assert plan2["missing"] == ["c.py"]
+        assert set(plan2["valid"]) == {"a.py", "b.py"}
+
+        # Run incremental indexing: only the missing file c.py should be encoded
+        res2 = _index_project_embeddings(vstore, db, proj_name)
+        assert res2["code"] == 1, f"Expected exactly 1 incremental file indexed, got: {res2}"
+        assert vstore.needs_reindex(proj_name) is False
+
+        # All 3 files are now valid
+        plan3 = vstore.get_reindex_plan(proj_name)
+        assert set(plan3["valid"]) == {"a.py", "b.py", "c.py"}
+        assert len(plan3["missing"]) == 0
+
+    finally:
+        db.delete_project(proj_name)
+
+
+def test_jwt_guard_and_env_configuration():
+    import os
+    from app.dependencies import validate_jwt_secret
+    from plagiarism_engine.db.helpers import get_database_url, DEFAULT_PG_URL
+
+    # 1. Empty / whitespace secret in production raises RuntimeError
+    for empty_val in ["", "   ", None]:
+        failed = False
+        try:
+            validate_jwt_secret(empty_val, app_env="production")
+        except RuntimeError as e:
+            failed = True
+            assert "JWT_SECRET must be set when APP_ENV=production" in str(e)
+        assert failed, f"Expected empty value '{empty_val}' to raise RuntimeError"
+
+    # 2. Known placeholders in production raise RuntimeError
+    for placeholder in ["your-secret-here", "change-me", "secret", "secret-key", "default-secret"]:
+        failed = False
+        try:
+            validate_jwt_secret(placeholder, app_env="production")
+        except RuntimeError as e:
+            failed = True
+            assert "cannot be a known insecure placeholder" in str(e)
+        assert failed, f"Expected placeholder '{placeholder}' to raise RuntimeError"
+
+    # 3. Short secrets (< 32 chars) in production raise RuntimeError
+    failed = False
+    try:
+        validate_jwt_secret("short-secret-key-12345", app_env="production")
+    except RuntimeError as e:
+        failed = True
+        assert "at least 32 characters long" in str(e)
+    assert failed, "Expected short secret to raise RuntimeError"
+
+    # 4. Valid secret (>= 32 chars) in production succeeds
+    valid_secret = "a_very_secure_random_production_jwt_secret_key_12345"
+    assert validate_jwt_secret(valid_secret, app_env="production") == valid_secret
+
+    # 5. In development, None or empty generates a random secret
+    dev_secret = validate_jwt_secret(None, app_env="development")
+    assert isinstance(dev_secret, str) and len(dev_secret) == 64
+
+    # 6. Database URL guard in production
+    old_env = os.environ.copy()
+    try:
+        os.environ["APP_ENV"] = "production"
+        os.environ.pop("DATABASE_URL", None)
+        failed = False
+        try:
+            get_database_url()
+        except RuntimeError as e:
+            failed = True
+            assert "DATABASE_URL must be explicitly configured when APP_ENV=production" in str(e)
+        assert failed, "Expected unset DATABASE_URL in production to raise RuntimeError"
+
+        # In dev, unset DATABASE_URL returns DEFAULT_PG_URL
+        os.environ["APP_ENV"] = "development"
+        assert get_database_url() == DEFAULT_PG_URL
+
+        # With explicit DATABASE_URL, it is returned in either mode
+        custom_url = "postgresql://produser:secret@proddb:5432/prod_plagiarism"
+        os.environ["DATABASE_URL"] = custom_url
+        os.environ["APP_ENV"] = "production"
+        assert get_database_url() == custom_url
+    finally:
+        os.environ.clear()
+        os.environ.update(old_env)
+
+
 class TestPlagiarismEngineAndAPI(unittest.TestCase):
     def test_01_arabic_normalization(self):
         test_arabic_normalization_unification()
@@ -809,6 +1383,48 @@ class TestPlagiarismEngineAndAPI(unittest.TestCase):
 
     def test_15_mixed_language_alpha(self):
         test_mixed_language_alpha()
+
+    def test_16_file_policy_classification(self):
+        test_file_policy_classification()
+
+    def test_17_walk_stops_completely_at_total_size_limit(self):
+        test_walk_stops_completely_at_total_size_limit()
+
+    def test_18_upload_excludes_config_and_logs_end_to_end(self):
+        test_upload_excludes_config_and_logs_end_to_end()
+
+    def test_19_code_gate(self):
+        test_code_gate()
+
+    def test_20_text_cap(self):
+        test_text_cap()
+
+    def test_21_embedded_copy_production_params(self):
+        test_embedded_copy_production_params()
+
+    def test_22_common_fp_suppression(self):
+        test_common_fp_suppression()
+
+    def test_23_small_file_exact_code_detected(self):
+        test_small_file_exact_code_detected()
+
+    def test_24_fusion_scorer_default_filename_guess_lexer(self):
+        test_fusion_scorer_default_filename_guess_lexer()
+
+    def test_25_containment_elevation_condition(self):
+        test_containment_elevation_condition()
+
+    def test_26_symmetric_small_file_detection(self):
+        test_symmetric_small_file_detection()
+
+    def test_27_compare_endpoints_reject_excluded_files(self):
+        test_compare_endpoints_reject_excluded_files()
+
+    def test_28_incremental_reindex(self):
+        test_incremental_reindex()
+
+    def test_29_jwt_guard(self):
+        test_jwt_guard_and_env_configuration()
 
 
 if __name__ == "__main__":

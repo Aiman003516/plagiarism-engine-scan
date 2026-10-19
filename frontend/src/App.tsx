@@ -44,7 +44,16 @@ const ForceChangePasswordPage = React.lazy(
 // --- Route guard: requires a valid auth token in localStorage ---
 
 function ProtectedRoute() {
-  const token = localStorage.getItem("auth_token");
+  const [token, setToken] = React.useState(() => localStorage.getItem("auth_token"));
+
+  React.useEffect(() => {
+    const handleAuthExpired = () => {
+      setToken(null);
+    };
+    window.addEventListener("auth-expired", handleAuthExpired);
+    return () => window.removeEventListener("auth-expired", handleAuthExpired);
+  }, []);
+
   if (!token) return <Navigate to="/login" replace />;
   return <Outlet />;
 }
@@ -59,12 +68,17 @@ function LoadingSpinner() {
   );
 }
 
+import { useScanStreamReconnection } from "./pages/plagiarism/hooks/useScanStream";
+
 /**
  * AppLayout — authenticated shell: sidebar + scrollable content region.
  * Mounted as a pathless layout route *inside* ProtectedRoute so the sidebar
  * never renders on public pages (/login, 404).
  */
 function AppLayout() {
+  // Global background listener: keeps scan/intake execution stream connected across all pages
+  useScanStreamReconnection();
+
   return (
     <div className="h-full w-full flex overflow-hidden bg-background text-text-main">
       <Sidebar />

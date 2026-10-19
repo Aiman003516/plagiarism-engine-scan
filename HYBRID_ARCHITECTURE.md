@@ -2,8 +2,18 @@
 
 > **Project**: Ministry Plagiarism Detection Engine  
 > **Author**: Aiman  
-> **Date**: October 2, 2026  
-> **Status**: Architecture Specification (Pre-Implementation)
+> **Date**: October 2, 2026 (Updated October 2026)  
+> **Status**: Historical Specification — FAISS Retired in Favor of Unified PostgreSQL Architecture
+
+> [!IMPORTANT]
+> **HISTORICAL ARCHITECTURE NOTE — FAISS RETIRED**  
+> FAISS has been completely removed from the production runtime in favor of the **Unified PostgreSQL Architecture** (`UNIFIED_POSTGRES_ARCHITECTURE.md`) with Binary Quantization (`BIT(1024)`) and 2-Step Rescoring. Dual-writing to FAISS in RAM was removed to eliminate out-of-sync state, memory leaks, and serverless cold-start limitations.
+>
+> **Current Evidence-Gated Fusion Rules (`plagiarism_engine/fusion_scorer.py`):**
+> 1. **Code Semantic Gate:** Source code is **never admitted on semantic similarity alone**. A semantic boost is only permitted if the pair shares $\ge 3$ Winnowing fingerprints and has calibrated semantic score $\ge 0.70$. When gated, $\alpha = 0.30$; otherwise code retains $\alpha = 0.60$.
+> 2. **Embedded Copy Containment:** When a smaller file is contained inside a larger file (containment $\ge 80\%$ with smaller file $\ge 5$ fingerprints), $s_{lexical} = \max(s_{winnowing}, \text{containment})$.
+> 3. **Zero-Evidence Ceilings:** Code with 0 shared fingerprints is strictly capped at `LOW` ($\le 0.50$); text with 0 shared fingerprints is capped at `HIGH` ($\le 0.75$, never `CRITICAL`).
+> 4. **MOSS-Style Common Suppression:** Fingerprints appearing in $> 5$ projects (or $> 5\%$ of total corpus) are suppressed from candidate generation as shared boilerplate/framework templates.
 
 ---
 

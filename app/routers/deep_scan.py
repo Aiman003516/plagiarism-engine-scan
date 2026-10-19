@@ -1,8 +1,9 @@
 """AI deep scan endpoints (single and bulk)."""
 
 import asyncio
+import threading
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from fastapi import HTTPException, Depends
 from pydantic import BaseModel
 
@@ -13,6 +14,7 @@ from app.services.embeddings import _index_project_embeddings
 from app.state import get_db, get_vstore
 
 router = APIRouter(tags=["deep-scan"])
+_corpus_index_lock = threading.Lock()
 
 
 class DeepScanRequest(BaseModel):
@@ -67,6 +69,14 @@ async def deep_scan(req: DeepScanRequest):
             status_code=400,
             detail="Both 'file1_path' and 'file2_path' are required.",
         )
+    from plagiarism_engine.file_policy import is_scannable
+    for p in (req.file1_path, req.file2_path):
+        ok, reason = is_scannable(p)
+        if not ok:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File '{p}' is excluded from plagiarism scanning ({reason}).",
+            )
 
     # --- 1. Load both files' content from the database ----------------------
     files1 = db.get_project_files(project_id)
@@ -168,36 +178,42 @@ async def deep_scan_bulk(req: BulkDeepScanRequest):
 
     vstore = get_vstore()
 
-    # Embedding generation is decoupled from the upload stream, so projects
-    # that were never deep-indexed hold ZERO vectors. Build the index on demand
-    # for the target project (and any unindexed recent corpus projects) so Deep
-    # Scan always works even when the user never indexed manually.
-    def _ensure_indexed():
-        pids = [project_id]
-        for proj in db.get_all_projects(limit=50):
-            pid = proj.get("id") or proj.get("name")
-            if pid and pid not in pids:
-                pids.append(pid)
-        for pid in pids:
-            try:
-                if vstore.needs_reindex(pid):
-                    print(
-                        f"[Postgres Vector] Project '{pid}' has missing or stale vectors; "
-                        f"re-indexing before bulk deep scan..."
-                    )
-                    _index_project_embeddings(vstore, db, pid)
-            except Exception as e:
-                if pid == project_id:
-                    raise
-                print(f"[Postgres Vector] Skipping corpus project '{pid}' (indexing failed: {e})")
+    # 1. Target project is indexed synchronously if it needs indexing
+    if vstore.needs_reindex(project_id):
+        try:
+            await asyncio.get_event_loop().run_in_executor(
+                None, lambda: _index_project_embeddings(vstore, db, project_id)
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Deep scan auto-indexing failed for target project '{project_id}': {str(e)}",
+            )
 
-    try:
-        await asyncio.get_event_loop().run_in_executor(None, _ensure_indexed)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Deep scan auto-indexing failed for project '{project_id}': {str(e)}",
-        )
+    # 2. Check corpus projects: count unindexed projects and dispatch single-flight background worker
+    corpus_pids = [
+        (p.get("id") or p.get("name"))
+        for p in db.get_all_projects(limit=50)
+        if (p.get("id") or p.get("name")) and (p.get("id") or p.get("name")) != project_id
+    ]
+    unindexed_corpus = [pid for pid in corpus_pids if vstore.needs_reindex(pid)]
+    pending_count = len(unindexed_corpus)
+
+    if unindexed_corpus:
+        def _index_corpus_worker(pids: List[str]):
+            if not _corpus_index_lock.acquire(blocking=False):
+                return
+            try:
+                for pid in pids:
+                    try:
+                        if vstore.needs_reindex(pid):
+                            _index_project_embeddings(vstore, db, pid)
+                    except Exception as e:
+                        print(f"[Deep Scan] Background indexing error on '{pid}': {e}")
+            finally:
+                _corpus_index_lock.release()
+
+        threading.Thread(target=_index_corpus_worker, args=(unindexed_corpus,), daemon=True).start()
 
     try:
         matches = await asyncio.get_event_loop().run_in_executor(
@@ -206,8 +222,15 @@ async def deep_scan_bulk(req: BulkDeepScanRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Bulk deep scan failed: {str(e)}")
 
+    from plagiarism_engine.file_policy import is_scannable
+    matches = [
+        m for m in matches
+        if is_scannable(m.get("source_file", ""))[0] and is_scannable(m.get("matched_file", ""))[0]
+    ]
+
     return {
         "project_id": project_id,
         "match_count": len(matches),
         "matches": matches,
+        "pending_projects": pending_count,
     }

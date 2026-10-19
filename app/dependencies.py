@@ -15,22 +15,62 @@ load_project_env()
 # AUTHENTICATION & RBAC (JWT)
 # ============================================================================
 
-JWT_SECRET = os.environ.get("JWT_SECRET")
-if not JWT_SECRET:
-    if os.environ.get("APP_ENV", "").strip().lower() == "production":
-        raise RuntimeError(
-            "JWT_SECRET must be set when APP_ENV=production. "
-            "Add a long random JWT_SECRET to the environment or .env file."
-        )
+from typing import Optional
+
+KNOWN_JWT_PLACEHOLDERS = {
+    "your-secret-here",
+    "change-me",
+    "changeme",
+    "secret",
+    "secret-key",
+    "secretkey",
+    "jwt-secret",
+    "default-secret",
+    "password",
+    "admin",
+    "12345678",
+}
+
+
+def validate_jwt_secret(secret: Optional[str] = None, app_env: Optional[str] = None) -> str:
+    """Validate JWT_SECRET. In production, refuse empty, known placeholder, or <32 char secrets."""
+    env = (app_env if app_env is not None else os.environ.get("APP_ENV", "")).strip().lower()
+    is_prod = env == "production"
+
+    if is_prod:
+        if not secret or not str(secret).strip():
+            raise RuntimeError(
+                "JWT_SECRET must be set when APP_ENV=production. "
+                "Add a long random JWT_SECRET to the environment or .env file."
+            )
+        s = str(secret).strip()
+        if s.lower() in KNOWN_JWT_PLACEHOLDERS:
+            raise RuntimeError(
+                f"JWT_SECRET cannot be a known insecure placeholder ('{s}') when APP_ENV=production."
+            )
+        if len(s) < 32:
+            raise RuntimeError(
+                f"JWT_SECRET must be at least 32 characters long when APP_ENV=production (got {len(s)} chars)."
+            )
+        return s
+
+    # Development or testing fallback
+    if secret and str(secret).strip():
+        return str(secret).strip()
+
     import secrets as _secrets
-    JWT_SECRET = _secrets.token_hex(32)
     import warnings
+    generated = _secrets.token_hex(32)
     warnings.warn(
         "JWT_SECRET not set in environment. Generated a random secret. "
         "All tokens will be invalidated on server restart. "
         "Set JWT_SECRET in your .env file for production.",
         stacklevel=2,
     )
+    return generated
+
+
+JWT_SECRET = validate_jwt_secret(os.environ.get("JWT_SECRET"), os.environ.get("APP_ENV"))
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 

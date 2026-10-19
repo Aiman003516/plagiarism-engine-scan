@@ -382,10 +382,14 @@ PHASES = {"size": phase_size, "ingest": phase_ingest, "embed": phase_embed, "qui
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--phase", required=True, choices=list(PHASES))
+    ap.add_argument("--phase", required=True, help="comma-separated phases: size, ingest, embed, quick, deep, report, cleanup")
     ap.add_argument("--only", default="", help="comma-separated folder names / slugs")
     args = ap.parse_args()
-    PHASES[args.phase](selected(args.only))
+    requested_phases = [p.strip() for p in args.phase.split(",") if p.strip()]
+    for p in requested_phases:
+        if p not in PHASES:
+            raise ValueError(f"Unknown phase '{p}'. Choices are: {list(PHASES.keys())}")
+        PHASES[p](selected(args.only))
     return 0
 
 

@@ -10,6 +10,7 @@ own small module while callers keep using one object:
 from .helpers import (
     HAS_PSYCOPG2,
     DEFAULT_PG_URL,
+    get_database_url,
     clean_str,
     compress_text,
     decompress_text,
@@ -71,6 +72,7 @@ __all__ = [
     "store",
     "HAS_PSYCOPG2",
     "DEFAULT_PG_URL",
+    "get_database_url",
     "clean_str",
     "compress_text",
     "decompress_text",

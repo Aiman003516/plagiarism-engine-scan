@@ -11,7 +11,7 @@ import { API_BASE_URL, plagiarismApi } from "../../lib/api";
 import { readZipScanStream, handleStreamSession } from "./hooks/useScanStream";
 import {
   CODE_EXTS, TEXT_EXTS, ARCHIVE_EXTS, IGNORE_PATTERNS,
-  BINARY_EXTS, formatFileSize, traverseDirectoryEntry
+  BINARY_EXTS, formatFileSize, traverseDirectoryEntry, policyExclusionReason
 } from "./fileConstants";
 import { StagedFilesExplorer } from "./StagedFilesExplorer";
 
@@ -78,7 +78,7 @@ export function UploadSection() {
         }
 
         const ext = file.name.split(".").pop()?.toLowerCase() || "";
-        if (BINARY_EXTS.has(ext)) {
+        if (BINARY_EXTS.has(ext) || policyExclusionReason(file.name)) {
           localBloatCount++;
           continue;
         }
@@ -255,6 +255,7 @@ export function UploadSection() {
     };
     const onError = (message: string) => {
       appendLog(`[${new Date().toLocaleTimeString()}] [ERROR] ❌ ${message}`);
+      useScanStore.getState().failScan(message);
       toast.error(message);
     };
 
@@ -292,15 +293,18 @@ export function UploadSection() {
           signal: controller.signal,
         });
         const result = await readZipScanStream(response, appendServerLog, handleStreamSession);
-        onComplete(result);
+        if (result) {
+          onComplete(result);
+        }
       } else {
         appendLog(`[${new Date().toLocaleTimeString()}] [INTAKE] Code files: ${stagedCodeCount}, Documents: ${stagedDocCount}, Total LOC: ${stagedLoc}`);
         const payloadFiles = uploadedFiles
-          .filter(f => f.content !== undefined && f.content !== null && f.type !== "other" && f.type !== "archive")
+          .filter(f => f.type !== "other" && f.type !== "archive")
           .map(f => ({
             path: f.path,
             content: f.content || "",
             file_type: f.type,
+            file: f.file,
           }));
 
         if (payloadFiles.length === 0) {

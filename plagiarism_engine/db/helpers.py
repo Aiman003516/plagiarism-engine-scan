@@ -12,6 +12,19 @@ except ImportError:
 
 DEFAULT_PG_URL = "postgresql://postgres:postgres@localhost:5432/plagiarism_engine_db"
 
+def get_database_url() -> str:
+    """Return the database URL or default, refusing default if APP_ENV=production."""
+    import os
+    env_url = os.getenv("DATABASE_URL")
+    if env_url and env_url.strip():
+        return env_url.strip()
+    if os.getenv("APP_ENV", "").strip().lower() == "production":
+        raise RuntimeError(
+            "DATABASE_URL must be explicitly configured when APP_ENV=production. "
+            "Refusing to use the default local development database URL."
+        )
+    return DEFAULT_PG_URL
+
 def clean_str(val: Any) -> str:
     """Sanitizes string inputs to prevent NUL byte (0x00) PostgreSQL driver crashes."""
     if val is None:

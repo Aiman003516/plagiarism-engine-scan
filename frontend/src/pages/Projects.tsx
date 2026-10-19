@@ -14,8 +14,7 @@ import { plagiarismApi, ProjectSummary, ProjectFile } from "../lib/api";
 
 export default function Projects() {
   const { t } = useTranslation();
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { projects, loading, error, refresh: load } = useProjectsCache();
   const [search, setSearch] = useState("");
   const [filesProject, setFilesProject] = useState<{
     project: ProjectSummary;
@@ -38,22 +37,6 @@ export default function Projects() {
     }
   }, []);
   const isStudent = user?.role === "student";
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      const res = await plagiarismApi.getProjects();
-      setProjects(res.projects || []);
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to load projects");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
 
   const viewFiles = async (project: ProjectSummary) => {
     setLoadingFiles(true);
@@ -126,7 +109,7 @@ export default function Projects() {
         </div>
       </header>
 
-      {loading ? (
+      {loading && projects.length === 0 ? (
         <div className="flex items-center justify-center min-h-[40vh] text-text-muted">
           <RefreshCw className="w-6 h-6 animate-spin text-accent" />
         </div>

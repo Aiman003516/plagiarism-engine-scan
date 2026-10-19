@@ -36,6 +36,22 @@ def _run_intake(
 
     log(f"[PHASE 1/3] 📂 Extracted {len(project_files)} files from '{project_name}'")
 
+    # Central file-scope policy: every upload path (direct, streaming, ZIP, Git) passes through
+    # here, so config / template / log / data files are never stored, fingerprinted or embedded.
+    from plagiarism_engine.file_policy import filter_scannable
+    project_files, excluded_files = filter_scannable(project_files)
+    if excluded_files:
+        reasons: Dict[str, int] = {}
+        for item in excluded_files:
+            reasons[item["reason"]] = reasons.get(item["reason"], 0) + 1
+        summary = ", ".join(f"{n} {r}" for r, n in sorted(reasons.items()))
+        log(f"   → Excluded {len(excluded_files)} non-scannable file(s) by policy ({summary})")
+    if not project_files:
+        raise ValueError(
+            f"No scannable files in '{project_name}': all {len(excluded_files)} file(s) are config, template, "
+            f"log/data, binary or unsupported types."
+        )
+
     code_files = [f for f in project_files if f.get("file_type") == "code"]
     text_files = [f for f in project_files if f.get("file_type") == "text"]
 
@@ -125,6 +141,8 @@ def _run_intake(
         "total_loc": total_loc,
         "languages_detected": sorted(languages),
         "timestamp": timestamp,
+        "excluded_files": excluded_files,
+        "excluded_files_count": len(excluded_files),
     }
 
     if git_metadata:
@@ -146,11 +164,25 @@ def _run_analysis(
         if log_callback:
             log_callback(msg)
 
-    log(f"[PHASE 1/3] 📂 Loading project '{project_name}' from database...")
+    log(f"[PHASE 1/4] 📂 Loading project '{project_name}' from database...")
     project_files = db.get_project_files(project_name)
     if not project_files:
         raise ValueError(f"Project '{project_name}' not found in database.")
-        
+
+    # Legacy guard: projects stored before the file-scope policy existed can still contain config,
+    # template or log/data files. They are never scanned or scored (source or candidate side).
+    from plagiarism_engine.file_policy import is_scannable
+
+    def _scannable(path: str) -> bool:
+        return is_scannable(path)[0]
+
+    skipped_legacy = [f.get("relative_path", "") for f in project_files if not _scannable(f.get("relative_path", ""))]
+    if skipped_legacy:
+        log(f"   → Skipping {len(skipped_legacy)} stored file(s) excluded by the file-scope policy (config/template/log/data)")
+        project_files = [f for f in project_files if _scannable(f.get("relative_path", ""))]
+    if not project_files:
+        raise ValueError(f"Project '{project_name}' has no scannable files (all are config/template/log/data).")
+
     code_files = [f for f in project_files if f.get("file_type") == "code"]
     text_files = [f for f in project_files if f.get("file_type") == "text"]
     
@@ -163,7 +195,7 @@ def _run_analysis(
         if ext:
             languages.add(ext.lstrip("."))
 
-    log("[PHASE 2/3] 🔍 Querying fingerprint index for candidates...")
+    log(f"[PHASE 2/4] 🔍 Querying fingerprint index for candidates ({len(code_files)} code, {len(text_files)} text files)...")
     
     # Fetch fingerprints for this project
     file_fingerprints = db.get_project_fingerprints(project_name)
@@ -174,60 +206,133 @@ def _run_analysis(
 
     total_candidates = 0
 
-    for f in project_files:
-        rel_path = f.get("relative_path", "")
-        ftype = f.get("file_type", "")
-        fps = file_fingerprints.get(rel_path, [])
-        
-        if not fps:
-            continue
-            
-        fp_hashes = [h for h, p in fps]
-        total_fps = len(fp_hashes)
-        
-        candidates = db.query_candidates(fp_hashes, ftype, project_name)
-        
-        # Filter candidates: must share at least 5 fingerprints or 10%
-        valid_candidates = {key: count for key, count in candidates.items() if count >= 5 or (count / total_fps) > 0.1}
-        total_candidates += len(valid_candidates)
-        
-        for key, count in valid_candidates.items():
-            other_pid, other_path = key.split("::", 1)
-            
-            target_fps = db.get_file_fingerprint_count(other_pid, other_path)
-            if not target_fps:
+    # MOSS-style common-code suppression: fingerprints appearing in >= max(5, 5% of projects)
+    # are shared boilerplate/framework templates and ignored during candidate discovery.
+    from plagiarism_engine.config import (
+        COMMON_FP_MIN_PROJECTS,
+        COMMON_FP_FRACTION,
+        SEMANTIC_ADMISSION_RAW,
+        CODE_SEMANTIC_GATE,
+    )
+    all_proj_count = len(db.get_all_projects(limit=5000)) or 1
+    max_fp_projects = max(COMMON_FP_MIN_PROJECTS, int(COMMON_FP_FRACTION * all_proj_count))
+    min_code_fps = CODE_SEMANTIC_GATE.get("min_shared_fps", 3)
+
+    # 1. Performance optimization: single SQL candidate query with suppression
+    if hasattr(db, "query_project_candidates"):
+        raw_candidates = db.query_project_candidates(
+            project_id=project_name,
+            max_common_projects=max_fp_projects,
+            min_shared=1,
+        )
+        target_pids = set(c["target_project"] for c in raw_candidates)
+        target_counts = db.get_file_fingerprint_counts_for_projects(target_pids) if hasattr(db, "get_file_fingerprint_counts_for_projects") else {}
+        source_counts = {path: len(set(h for h, _ in fps)) for path, fps in file_fingerprints.items()}
+
+        for c in raw_candidates:
+            rel_path = c["source_file"]
+            other_pid = c["target_project"]
+            other_path = c["target_file"]
+            count = c["shared"]
+            ftype = c["file_type"]
+
+            if not _scannable(other_path):
                 continue
-                
-            # Overlap coefficient: shared / min(source, target) allows detecting small files pasted inside large ones
+
+            total_fps = source_counts.get(rel_path, 0)
+            target_fps = target_counts.get((other_pid, other_path))
+            if target_fps is None:
+                target_fps = db.get_file_fingerprint_count(other_pid, other_path)
+            if not target_fps or not total_fps:
+                continue
+
+            # Symmetric candidate admission:
+            # 1. Has at least min_code_fps (>= 3) shared fingerprints
+            # 2. OR 100% exact match for a small file on either side (< 3 fps)
+            is_small_exact = (total_fps < min_code_fps and count == total_fps) or (target_fps < min_code_fps and count == target_fps)
+            if count < min_code_fps and not is_small_exact:
+                continue
+
+            total_candidates += 1
             sim_val = min(count / min(total_fps, target_fps), 1.0)
-            
             if ftype == "code":
-                if sim_val >= 0.25:  # Lowered threshold to see results
-                    max_code_sim = max(max_code_sim, sim_val)
+                if count >= min_code_fps or is_small_exact or sim_val >= 0.25:
                     all_comparisons.append({
                         "project": other_pid,
                         "file1": rel_path,
                         "file2": other_path,
                         "similarity": f"{round(sim_val * 100, 2)}%",
                         "type": "Code",
-                        "status": "FLAGGED" if sim_val >= 0.65 else "Moderate"
+                        "status": "SAFE",
                     })
             elif ftype == "text":
-                if sim_val >= 0.20:
-                    max_text_sim = max(max_text_sim, sim_val)
+                if sim_val >= 0.20 or count >= 5 or is_small_exact:
                     all_comparisons.append({
                         "project": other_pid,
                         "file1": rel_path,
                         "file2": other_path,
                         "similarity": f"{round(sim_val * 100, 2)}%",
                         "type": "Text",
-                        "status": "FLAGGED" if sim_val >= 0.5 else "Moderate"
+                        "status": "SAFE",
                     })
+    else:
+        # Fallback per-file query path
+        common_fps = set()
+        if hasattr(db, "get_common_fingerprints"):
+            try:
+                all_source_hashes = set(h for fps in file_fingerprints.values() for h, _ in fps)
+                common_fps = db.get_common_fingerprints(max_fp_projects, candidate_hashes=all_source_hashes)
+            except Exception:
+                pass
+
+        for f in project_files:
+            rel_path = f.get("relative_path", "")
+            ftype = f.get("file_type", "")
+            fps = file_fingerprints.get(rel_path, [])
+            if not fps:
+                continue
+            fp_hashes = [h for h, p in fps if h not in common_fps] if common_fps else [h for h, p in fps]
+            if not fp_hashes:
+                continue
+            total_fps = len(fp_hashes)
+            candidates = db.query_candidates(fp_hashes, ftype, project_name)
+            for key, count in candidates.items():
+                other_pid, other_path = key.split("::", 1)
+                if not _scannable(other_path):
+                    continue
+                target_fps = db.get_file_fingerprint_count(other_pid, other_path)
+                if not target_fps:
+                    continue
+                is_small_exact = (total_fps < min_code_fps and count == total_fps) or (target_fps < min_code_fps and count == target_fps)
+                if count < min_code_fps and not is_small_exact:
+                    continue
+                total_candidates += 1
+                sim_val = min(count / min(total_fps, target_fps), 1.0)
+                if ftype == "code":
+                    if count >= min_code_fps or is_small_exact or sim_val >= 0.25:
+                        all_comparisons.append({
+                            "project": other_pid,
+                            "file1": rel_path,
+                            "file2": other_path,
+                            "similarity": f"{round(sim_val * 100, 2)}%",
+                            "type": "Code",
+                            "status": "SAFE",
+                        })
+                elif ftype == "text":
+                    if sim_val >= 0.20 or count >= 5 or is_small_exact:
+                        all_comparisons.append({
+                            "project": other_pid,
+                            "file1": rel_path,
+                            "file2": other_path,
+                            "similarity": f"{round(sim_val * 100, 2)}%",
+                            "type": "Text",
+                            "status": "SAFE",
+                        })
 
     log(f"   ✅ Scan complete: {len(all_comparisons)} matches from {total_candidates} candidates.")
 
     # Phase 3: Hybrid Fusion Scoring (Winnowing + Semantic)
-    log("[PHASE 3/3] 🧬 Running Hybrid Fusion Algorithm (Lexical + Semantic)...")
+    log("[PHASE 3/4] 🧬 Running Hybrid Fusion Algorithm (Lexical + Semantic)...")
     from plagiarism_engine.fusion_scorer import compute_fusion_score
     from plagiarism_engine.winnowing import WinnowingEngine
     from app.state import get_vstore
@@ -277,30 +382,54 @@ def _run_analysis(
             tgt_proj = m.get("matched_project_id") or m.get("target_project", "")
             tgt_file = m.get("matched_file") or m.get("target_file", "")
             sim = float(m.get("similarity", 0.0))
+            raw_sim = float(m.get("similarity_raw", sim))
+            model_used = m.get("embedding_model")
+            domain = m.get("domain", "")
+
             if src_file and tgt_proj and tgt_file:
+                if not (_scannable(src_file) and _scannable(tgt_file)):
+                    continue
                 key = (src_file, tgt_proj, tgt_file)
                 semantic_lookup[key] = sim
-                # Include high-confidence semantic matches even if lexical Winnowing missed them (pure paraphrase)
-                if sim >= 0.70 and key not in existing_pairs:
-                    existing_pairs.add(key)
-                    domain_label = "Code" if m.get("domain") == "code" else "Text"
-                    all_comparisons.append({
-                        "project": tgt_proj,
-                        "file1": src_file,
-                        "file2": tgt_file,
-                        "similarity": f"{round(sim * 100, 2)}%",
-                        "type": domain_label,
-                        "status": "FLAGGED" if sim >= 0.76 else "Moderate",
-                    })
+
+                # Text semantic-only admission: raw >= SEMANTIC_ADMISSION_RAW[model]
+                # Code is NEVER admitted semantic-only (requires >= 3 shared fingerprints).
+                if key not in existing_pairs:
+                    if domain == "text":
+                        raw_threshold = SEMANTIC_ADMISSION_RAW.get(model_used, 0.885)
+                        if raw_sim >= raw_threshold:
+                            existing_pairs.add(key)
+                            all_comparisons.append({
+                                "project": tgt_proj,
+                                "file1": src_file,
+                                "file2": tgt_file,
+                                "similarity": f"{round(sim * 100, 2)}%",
+                                "type": "Text",
+                                "status": "SAFE",
+                            })
     except Exception as e:
         log(f"   ⚠️ Semantic search failed: {e}")
 
     # Pre-cache source contents for speed
     source_contents = {f.get("relative_path", ""): f.get("content", "") for f in project_files}
 
+    # Pre-cache target files in batches per target project
+    needed_by_project: Dict[str, List[str]] = {}
+    for cmp in all_comparisons:
+        needed_by_project.setdefault(cmp["project"], []).append(cmp["file2"])
+    target_contents_cache: Dict[Tuple[str, str], str] = {}
+    for opid, paths in needed_by_project.items():
+        try:
+            t_files = db.get_files_by_paths(project_name, list(set(paths)), target_project_id=opid)
+            for tf in t_files:
+                target_contents_cache[(opid, tf.get("relative_path"))] = tf.get("content", "") or ""
+        except Exception:
+            pass
+
     # Evaluate the top matches (or all of them) with the Fusion Engine
     max_fusion_score = 0.0
     final_verdict = "SAFE"
+    report_rows = []
     
     for cmp in all_comparisons:
         try:
@@ -308,12 +437,12 @@ def _run_analysis(
             rel_path = cmp["file1"]
             other_path = cmp["file2"]
             source_content = source_contents.get(rel_path, "")
-            target_content = ""
+            target_content = target_contents_cache.get((other_pid, other_path))
 
-            # Get target file content from DB filtered by exact target project_id
-            target_files = db.get_files_by_paths(project_name, [other_path], target_project_id=other_pid)
-            if target_files:
-                target_content = target_files[0].get("content", "")
+            if target_content is None:
+                # Fallback if not cached
+                target_files = db.get_files_by_paths(project_name, [other_path], target_project_id=other_pid)
+                target_content = target_files[0].get("content", "") if target_files else ""
 
             if source_content and target_content:
                 # Get the pre-calculated Semantic Score from pgvector (or compute pair similarity if not in top-k)
@@ -330,6 +459,7 @@ def _run_analysis(
                     file_type="code" if cmp.get("type") == "Code" else "text",
                     winnowing_engine=winnow_engine,
                     filename=rel_path,
+                    filename_b=other_path,
                 )
 
                 # Update frontend comparison object
@@ -344,32 +474,65 @@ def _run_analysis(
 
                 # Track global max score
                 max_fusion_score = max(max_fusion_score, fusion_result["fusion_score"])
+                if cmp.get("type") == "Code":
+                    max_code_sim = max(max_code_sim, fusion_result["fusion_score"])
+                else:
+                    max_text_sim = max(max_text_sim, fusion_result["fusion_score"])
 
-                # Store in PostgreSQL scan_reports
+                # Collect for batched scan_reports insert
                 report_id = f"report_{uuid.uuid4().hex[:8]}"
-                if hasattr(db, 'mode'):  # Standard projects_store usage
-                    conn = db._get_connection()
-                    try:
-                        cur = conn.cursor()
-                        if db.mode == "postgresql":
-                            cur.execute("""
-                                INSERT INTO scan_reports (id, query_id, target_id, similarity_score, winnowing_score, semantic_score, fusion_score, alpha, verdict, match_type, details)
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                ON CONFLICT (id) DO NOTHING;
-                            """, (report_id, f"{project_name}::{rel_path}", f"{other_pid}::{other_path}", fusion_result["fusion_score"], fusion_result["winnowing_score"], fusion_result["semantic_score"], fusion_result["fusion_score"], fusion_result["alpha"], fusion_result["verdict"], cmp.get("type", "unknown"), "Hybrid Fusion"))
-                        else:
-                            cur.execute("""
-                                INSERT OR REPLACE INTO scan_reports (id, query_id, target_id, similarity_score, winnowing_score, semantic_score, fusion_score, alpha, verdict, match_type, details)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                            """, (report_id, f"{project_name}::{rel_path}", f"{other_pid}::{other_path}", fusion_result["fusion_score"], fusion_result["winnowing_score"], fusion_result["semantic_score"], fusion_result["fusion_score"], fusion_result["alpha"], fusion_result["verdict"], cmp.get("type", "unknown"), "Hybrid Fusion"))
-                        conn.commit()
-                    finally:
-                        conn.close()
-
+                report_rows.append((
+                    report_id,
+                    f"{project_name}::{rel_path}",
+                    f"{other_pid}::{other_path}",
+                    fusion_result["fusion_score"],
+                    fusion_result["winnowing_score"],
+                    fusion_result["semantic_score"],
+                    fusion_result["fusion_score"],
+                    fusion_result["alpha"],
+                    fusion_result["verdict"],
+                    cmp.get("type", "unknown"),
+                    "Hybrid Fusion",
+                ))
+            else:
+                cmp["fusion_score"] = 0.0
+                cmp["winnowing_score"] = 0.0
+                cmp["semantic_score"] = 0.0
+                cmp["containment_score"] = 0.0
+                cmp["embedded_copy"] = False
+                cmp["alpha"] = 1.0
+                cmp["status"] = "SAFE"
+                cmp["similarity"] = "0.0%"
         except Exception as e:
             cmp["fusion_score"] = 0
             cmp["status"] = "ERROR"
-            print(f"Fusion error on {cmp['file1']}: {e}")
+            print(f"Fusion error on {cmp.get('file1')}: {e}")
+
+    # Phase 4: Compile Final Integrity Report & Save
+    log("[PHASE 4/4] 📊 Compiling final integrity report and storing results in database...")
+
+    # Store all scan_reports in database via a single transaction / executemany
+    if report_rows and hasattr(db, 'mode'):
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            if db.mode == "postgresql":
+                cur.executemany("""
+                    INSERT INTO scan_reports (id, query_id, target_id, similarity_score, winnowing_score, semantic_score, fusion_score, alpha, verdict, match_type, details)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO NOTHING;
+                """, report_rows)
+            else:
+                cur.executemany("""
+                    INSERT OR REPLACE INTO scan_reports (id, query_id, target_id, similarity_score, winnowing_score, semantic_score, fusion_score, alpha, verdict, match_type, details)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """, report_rows)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            log(f"   ⚠️ Failed to save scan_reports in batch: {e}")
+        finally:
+            conn.close()
 
     overall = max_fusion_score
     from plagiarism_engine.fusion_scorer import verdict_for
@@ -377,15 +540,20 @@ def _run_analysis(
 
     log(f"✅ Full run complete. Overall similarity: {overall}% — Verdict: {verdict}")
 
+    try:
+        threshold_val = int(db.get_setting("similarity_threshold", 65))
+    except Exception:
+        threshold_val = 65
+
     result = {
         "status": "completed",
         "id": scan_id,
         "project_name": project_name,
         "overall_similarity": overall,
-        "code_similarity": round(max_code_sim * 100, 2),
-        "text_similarity": round(max_text_sim * 100, 2),
+        "code_similarity": round(max_code_sim, 2),
+        "text_similarity": round(max_text_sim, 2),
         "verdict": verdict,
-        "threshold": 65,
+        "threshold": threshold_val,
         "comparisons": all_comparisons,
         "code_files_count": len(code_files),
         "text_files_count": len(text_files),

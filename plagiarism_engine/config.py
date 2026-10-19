@@ -44,6 +44,29 @@ SEMANTIC_CALIBRATION_FLOOR: dict = {
     "LaBSE": 0.35,
 }
 
+# Raw semantic admission thresholds for semantic-only matches (pairs with 0 shared fingerprints).
+# BGE-M3 threshold 0.885 sits above the max unrelated real text pair (0.876, n=652) and admits both
+# English (0.960) and Arabic (0.909) paraphrases without depending on a calibrated floor.
+SEMANTIC_ADMISSION_RAW: dict = {
+    "bge-m3": 0.885,
+    "multilingual-e5-base": 0.890,
+    "LaBSE": 0.800,
+}
+
+# Code gate: code is never admitted on meaning alone. A semantic boost applies only when the pair
+# shares >= min_shared_fps Winnowing fingerprints.
+CODE_SEMANTIC_GATE: dict = {
+    "min_shared_fps": 3,
+    "min_calibrated": 0.70,
+    "alpha": 0.30,
+}
+
+# MOSS-style common-code suppression: fingerprints that appear in >= max(COMMON_FP_MIN_PROJECTS,
+# COMMON_FP_FRACTION * total_projects) are ignored as shared boilerplate/framework templates.
+COMMON_FP_MIN_PROJECTS = 5
+COMMON_FP_FRACTION = 0.05
+
+
 
 class Config:
     DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://localhost:5432/plagiarism_engine")
@@ -52,6 +75,6 @@ class Config:
     SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
     SUPABASE_STORAGE_BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "project-files")
-    JWT_SECRET = os.environ.get("JWT_SECRET", "your-secret-here")
+    JWT_SECRET = os.environ.get("JWT_SECRET", "")
     MODELS_DIR = os.environ.get("MODELS_DIR", "./models")
 

@@ -42,3 +42,17 @@ SEMANTIC_CALIBRATION_FLOOR = {
     "LaBSE": 0.35,
 }
 ```
+
+## 5. Real-Corpus Measurements & Evidence-Gated Rules (Phase 2)
+
+Measurements on the user's real project repository corpus (after removing configs and non-scannable files):
+
+| Metric | Measured Value | Engine Policy |
+|---|---|---|
+| Unrelated real text pairs (`bge-m3`, n=652) | p99 = 0.867, max = 0.876 | `SEMANTIC_ADMISSION_RAW["bge-m3"] = 0.885` |
+| English paraphrase test pair | raw cosine = 0.960 | Admitted (0.960 >= 0.885), reaches HIGH |
+| Arabic paraphrase test pair | raw cosine = 0.909 | Admitted (0.909 >= 0.885), reaches HIGH/LOW boundary |
+| Unrelated real code pairs (`unixcoder-base`) | p99 = 0.857, max = 0.906 | Capped at LOW without shared fingerprints |
+| Unrelated code pairs with calibrated sem >= 0.70 | **0 share even 1 fingerprint** (n=269) | Code requires >= 3 shared fps for semantic boost |
+| Restructured plagiarized code (`test_12`) | raw 0.840 (calibrated 0.771), 4 shared fps | Evidence-gated alpha = 0.30 -> Fusion 55.9% (HIGH) |
+

@@ -9,7 +9,7 @@ Round 2 changes:
   source file of the project, then each distinct embedding is fetched once and rescored in NumPy.
 """
 
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple, Optional, Union
 import json
 import numpy as np
 
@@ -365,17 +365,18 @@ class PgVectorStore:
             conn.close()
 
     SKIPPED_MARKER = "skipped:empty"
+    EXCLUDED_MARKER = "skipped:excluded"   # config / template / log / data (file-scope policy)
 
-    def mark_skipped(self, file_ids: List[str]) -> int:
-        """Tag files that were intentionally not embedded (empty content) so they are not
-        mistaken for an interrupted index run."""
+    def mark_skipped(self, file_ids: List[str], marker: Optional[str] = None) -> int:
+        """Tag files that were intentionally not embedded (empty content, or excluded by the
+        file-scope policy) so they are not mistaken for an interrupted index run."""
         if not file_ids:
             return 0
         conn = self.store._get_connection()
         try:
             cur = conn.cursor()
             ph = "%s" if self.store.mode == "postgresql" else "?"
-            rows = [(self.SKIPPED_MARKER, fid) for fid in file_ids]
+            rows = [(marker or self.SKIPPED_MARKER, fid) for fid in file_ids]
             sql = f"UPDATE project_files SET embedding_model = {ph} WHERE id = {ph} AND embedding_binary IS NULL;"
             if self.store.mode == "postgresql":
                 import psycopg2.extras
@@ -387,43 +388,72 @@ class PgVectorStore:
         finally:
             conn.close()
 
-    def needs_reindex(self, project_id: str, expected_models: Dict[str, Optional[str]]) -> bool:
-        """True if the project:
-        - has no embedded rows at all, or
-        - has any embedded row whose embedding_model differs from expected_models[file_type]
-          (legacy untagged rows count as stale), or
-        - has rows that are neither embedded nor marked as intentionally skipped
-          (an interrupted / partial index run)."""
+    def get_reindex_plan(self, project_id: str, expected_models: Dict[str, Optional[str]]) -> Dict[str, Any]:
+        """Classify project files into:
+        - missing: unindexed files (embedding_binary IS NULL AND embedding_model IS NULL)
+        - stale: embedded files with outdated or missing embedding_model tag
+        - valid: embedded files with current expected model
+        - skipped: intentionally skipped/excluded files
+        """
         conn = self.store._get_connection()
         try:
             cur = conn.cursor()
             ph = "%s" if self.store.mode == "postgresql" else "?"
             cur.execute(
-                f"SELECT file_type, embedding_model, COUNT(*) AS n FROM project_files "
-                f"WHERE project_id = {ph} AND embedding_binary IS NOT NULL "
-                f"GROUP BY file_type, embedding_model;",
+                f"SELECT relative_path, file_type, embedding_binary IS NOT NULL AS has_vec, embedding_model "
+                f"FROM project_files WHERE project_id = {ph};",
                 (project_id,),
             )
             rows = cur.fetchall()
-            cur.execute(
-                f"SELECT COUNT(*) AS n FROM project_files "
-                f"WHERE project_id = {ph} AND embedding_binary IS NULL AND embedding_model IS NULL;",
-                (project_id,),
-            )
-            unindexed = int(_row_get(cur.fetchone(), "n", 0) or 0)
+            missing = []
+            stale = []
+            valid = []
+            skipped = []
+            for r in rows:
+                path = _row_get(r, "relative_path", 0)
+                ftype = _row_get(r, "file_type", 1) or "text"
+                has_vec = bool(_row_get(r, "has_vec", 2))
+                model = _row_get(r, "embedding_model", 3)
+                expected = expected_models.get("code" if ftype == "code" else "text")
+
+                if has_vec:
+                    if model is not None and model == expected:
+                        valid.append(path)
+                    else:
+                        stale.append(path)
+                elif model in (self.SKIPPED_MARKER, self.EXCLUDED_MARKER):
+                    skipped.append(path)
+                else:
+                    missing.append(path)
+
+            return {
+                "needs_reindex": bool(missing or stale),
+                "missing": missing,
+                "stale": stale,
+                "valid": valid,
+                "skipped": skipped,
+            }
         finally:
             conn.close()
-        if not rows:
-            return True
-        if unindexed > 0:
-            return True
-        for r in rows:
-            ftype = _row_get(r, "file_type", 0) or "text"
-            model = _row_get(r, "embedding_model", 1)
-            expected = expected_models.get("code" if ftype == "code" else "text")
-            if model is None or model != expected:
-                return True
-        return False
+
+    def needs_reindex(
+        self,
+        project_id: str,
+        expected_models: Dict[str, Optional[str]],
+        detail: bool = False,
+    ) -> Any:
+        """True if the project:
+        - has no embedded rows at all, or
+        - has any embedded row whose embedding_model differs from expected_models[file_type]
+          (legacy untagged rows count as stale), or
+        - has rows that are neither embedded nor marked as intentionally skipped
+          (an interrupted / partial index run).
+        If detail=True, returns full dict with {'needs_reindex', 'missing', 'stale', 'valid', 'skipped'}.
+        """
+        plan = self.get_reindex_plan(project_id, expected_models)
+        if detail:
+            return plan
+        return plan["needs_reindex"]
 
     def count_project_vectors(self, project_id: str) -> int:
         """COUNT(*) WHERE embedding_binary IS NOT NULL"""

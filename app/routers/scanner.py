@@ -104,9 +104,12 @@ async def upload_and_scan(
 
     # Run the CPU/IO-heavy fingerprinting + comparison work in a worker thread so the
     # async event loop is never blocked (mirrors the streaming endpoints' behaviour).
-    result = await asyncio.get_event_loop().run_in_executor(
-        None, lambda: _run_intake(project_name, extracted_files)
-    )
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: _run_intake(project_name, extracted_files)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return result
 
 
@@ -273,7 +276,13 @@ async def git_scan(payload: GitScanRequest):
             if "relative_path" not in f:
                 f["relative_path"] = f.get("filename", "")
 
-        result = _run_intake(project_name, extracted_files, git_metadata=git_metadata)
+        try:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None, lambda: _run_intake(project_name, extracted_files, git_metadata=git_metadata)
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         return result
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -334,17 +343,58 @@ async def git_scan_stream(payload: GitScanRequest):
     )
 
 
-# --- Named scan on already-indexed project ---
+# --- Saved Project Scan (SSE Streaming) ---
+@router.post("/api/plagiarism/scan-stream", dependencies=[Depends(require_role())])
+async def run_scan_stream(req: ScanRequest):
+    target = req.target
+    if not target:
+        raise HTTPException(status_code=400, detail="No target project specified.")
+
+    session = _start_scan_session(target)
+
+    async def event_stream():
+        loop = asyncio.get_running_loop()
+
+        def log_callback(msg: str):
+            session.publish_log(msg)
+
+        def run_worker():
+            try:
+                log_callback(f"🚀 Initiating Saved Project Scan for '{target}'...")
+                res = _run_analysis(target, log_callback=log_callback)
+                res["scan_type"] = req.scan_type or "Saved Project Scan"
+                session.publish({"type": "complete", "result": res})
+            except Exception as e:
+                session.publish({"type": "error", "message": str(e)})
+
+        # Hand the client its reconnect capability before any work starts.
+        session.publish(session.header_event())
+
+        loop.run_in_executor(None, run_worker)
+
+        async for frame in _stream_scan_events(session):
+            yield frame
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# --- Named scan on already-indexed project (Synchronous fallback) ---
 @router.post("/api/plagiarism/scan", dependencies=[Depends(require_role())])
 async def run_scan(req: ScanRequest):
-    db = get_db()
     target = req.target
     if not target:
         raise HTTPException(status_code=400, detail="No target project specified.")
         
     try:
-        result = _run_analysis(target)
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, lambda: _run_analysis(target))
         result["scan_type"] = req.scan_type or "Saved Project Scan"
         return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

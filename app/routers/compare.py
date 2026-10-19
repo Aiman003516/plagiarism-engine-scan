@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter
 from app.dependencies import require_role
 from app.state import DATA_DIR, get_db
+from plagiarism_engine.file_policy import is_scannable
 
 router = APIRouter(tags=["compare"])
 
@@ -39,8 +40,10 @@ def _run_project_comparison(project_a: str, project_b: str) -> List[Dict[str, An
     for f in project_files:
         rel_path = f.get("relative_path", "")
         ftype = f.get("file_type", "")
+        if not rel_path or not is_scannable(rel_path)[0]:
+            continue
         fps = file_fingerprints.get(rel_path, [])
-        if not rel_path or not fps or ftype not in ("code", "text"):
+        if not fps or ftype not in ("code", "text"):
             continue
 
         fp_hashes = [h for h, _p in fps]
@@ -55,6 +58,8 @@ def _run_project_comparison(project_a: str, project_b: str) -> List[Dict[str, An
             if not key.startswith(prefix):
                 continue
             other_path = key[len(prefix):]
+            if not is_scannable(other_path)[0]:
+                continue
 
             total_b_fps = db.get_file_fingerprint_count(project_b, other_path)
             if not total_b_fps:
@@ -166,6 +171,13 @@ async def compare_files_endpoint(req: CompareFilesRequest):
             status_code=400,
             detail="'project_a', 'file_a', 'project_b' and 'file_b' are all required.",
         )
+
+    ok_a, reason_a = is_scannable(file_a)
+    ok_b, reason_b = is_scannable(file_b)
+    if not ok_a:
+        raise HTTPException(status_code=400, detail=f"File '{file_a}' is not scannable ({reason_a}).")
+    if not ok_b:
+        raise HTTPException(status_code=400, detail=f"File '{file_b}' is not scannable ({reason_b}).")
 
     def _load() -> tuple:
         return (

@@ -151,6 +151,25 @@ class ProjectsStoreMixin:
         finally:
             conn.close()
 
+    def get_all_project_names(self) -> List[str]:
+        """Retrieve only the names of all projects for fast stats calculation."""
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM projects;")
+            rows = cur.fetchall()
+            names = []
+            for r in rows:
+                if isinstance(r, dict) or hasattr(r, 'keys'):
+                    val = r.get('name', '')
+                else:
+                    val = r[0] if r else ''
+                if val:
+                    names.append(val)
+            return names
+        finally:
+            conn.close()
+
     def get_project_by_id(self, project_id: str) -> Optional[Dict[str, Any]]:
         """Fetch a single project by id."""
         conn = self._get_connection()
@@ -239,8 +258,38 @@ class ProjectsStoreMixin:
         finally:
             conn.close()
 
-    def get_project_files(self, project_id: str) -> List[Dict[str, Any]]:
+    def get_project_files(self, project_id: str, include_content: bool = True) -> List[Dict[str, Any]]:
         """Retrieve all files for a given project, fetching content from StorageService with DB fallback."""
+        pid = clean_str(project_id)
+        if not include_content:
+            conn = self._get_connection()
+            try:
+                cur = conn.cursor()
+                if self.mode == "postgresql":
+                    cur.execute("SELECT project_id, relative_path, file_type FROM project_files WHERE project_id = %s;", (pid,))
+                else:
+                    cur.execute("SELECT project_id, relative_path, file_type FROM project_files WHERE project_id = ?;", (pid,))
+                rows = cur.fetchall()
+                files = []
+                for r in rows:
+                    if isinstance(r, dict) or hasattr(r, 'keys'):
+                        files.append({
+                            "project_id": r['project_id'],
+                            "relative_path": r['relative_path'],
+                            "file_type": r['file_type'],
+                            "content": ""
+                        })
+                    else:
+                        files.append({
+                            "project_id": r[0],
+                            "relative_path": r[1],
+                            "file_type": r[2],
+                            "content": ""
+                        })
+                return files
+            finally:
+                conn.close()
+
         from plagiarism_engine.storage import get_storage_service
         storage = get_storage_service()
 
@@ -249,9 +298,9 @@ class ProjectsStoreMixin:
             cur = conn.cursor()
         
             if self.mode == "postgresql":
-                cur.execute("SELECT project_id, relative_path, file_type, content FROM project_files WHERE project_id = %s;", (project_id,))
+                cur.execute("SELECT project_id, relative_path, file_type, content FROM project_files WHERE project_id = %s;", (pid,))
             else:
-                cur.execute("SELECT project_id, relative_path, file_type, content FROM project_files WHERE project_id = ?;", (project_id,))
+                cur.execute("SELECT project_id, relative_path, file_type, content FROM project_files WHERE project_id = ?;", (pid,))
             
             rows = cur.fetchall()
 

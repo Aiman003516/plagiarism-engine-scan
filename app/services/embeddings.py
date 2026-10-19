@@ -1,8 +1,9 @@
 """On-demand Postgres vector embedding indexing (decoupled from the upload stream)."""
 
-from typing import Dict
+from typing import Dict, Optional, Any
 
 from plagiarism_engine import VectorStore, SystemDBStore
+from plagiarism_engine.vector_store import _safe_log
 
 
 # ---------------------------------------------------------------------------
@@ -12,34 +13,38 @@ def _index_project_embeddings(
     vstore: VectorStore,
     db_store: SystemDBStore,
     project_id: str,
-    log_callback=None,
+    log_callback: Optional[Any] = None,
+    force: bool = False,
 ) -> Dict[str, int]:
     """(Re)build a project's Postgres vector embeddings from its DB-stored files.
 
     Embedding generation was decoupled from the upload stream (``_run_intake``)
     for performance, so every freshly uploaded project starts with an EMPTY
-    vector index. This routine is the single place that fills it: it is called
-    on demand by POST /api/plagiarism/projects/{project_id}/index-embeddings
-    and automatically by Deep Scan / Hybrid Fusion when a project has no vectors yet.
+    vector index. This routine is called on demand by POST /api/plagiarism/projects/{id}/index-embeddings
+    and automatically by Deep Scan / Hybrid Fusion when a project has missing or stale vectors.
 
-    Any vectors already stored for the project are purged first, so repeated
-    calls stay idempotent instead of stacking duplicate embeddings for the
-    same files. Blocking by design (CodeBERT / BGE-M3 encoding) — callers run
-    it inside an executor so the event loop is never stalled.
+    Incremental by default: only encodes missing or stale files, preserving existing
+    valid vectors to avoid expensive redundant neural network encodings. Pass force=True
+    to wipe and re-encode all files from scratch.
     """
     files_data = db_store.get_project_files(project_id)
 
-    # Replace rather than append: keeps re-indexing idempotent.
-    vstore.delete_project(project_id)
+    if force:
+        vstore.delete_project(project_id)
 
     added = vstore.index_project_files(
         project_files=files_data,
         project_id=project_id,
         log_callback=log_callback,
+        force=force,
     )
 
-    print(
+    msg = (
         f"[Postgres Vector] Project '{project_id}': indexed {added.get('code', 0)} code + "
         f"{added.get('text', 0)} text vectors from {len(files_data)} stored files."
     )
+    if log_callback:
+        _safe_log(log_callback, msg)
+    else:
+        print(msg)
     return added

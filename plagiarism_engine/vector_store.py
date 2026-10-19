@@ -93,7 +93,6 @@ class LazyModelPool:
         if env_dir:
             candidates.append(Path(env_dir) / subdir)
         candidates.append(MODELS_DIR / subdir)
-        candidates.append(Path(r"D:\AI engine\models") / subdir)
         for cand in candidates:
             if cand.exists():
                 return cand
@@ -118,12 +117,20 @@ class LazyModelPool:
             fallback = MODEL_SUBDIRS["minilm"]
             resolved = self._resolve_model_dir(fallback)
             resolved_name = fallback
+            if resolved is not None:
+                warnings.warn(
+                    f"[LazyModelPool] Model '{subdir or key}' not found in MODELS_DIR ({MODELS_DIR}); "
+                    f"falling back to '{fallback}'. Vectors will be tagged '{fallback}' and never "
+                    f"compared with other models.",
+                    stacklevel=2,
+                )
+        if resolved is None:
             warnings.warn(
-                f"[LazyModelPool] Model '{subdir or key}' not found; falling back to '{fallback}'. "
-                f"Vectors will be tagged '{fallback}' and never compared with other models.",
+                f"[LazyModelPool] Required model folder '{subdir or key}' (and fallback '{MODEL_SUBDIRS.get('minilm')}') "
+                f"not found in MODELS_DIR ({MODELS_DIR}). Please set MODELS_DIR to a directory containing "
+                f"the model checkpoints.",
                 stacklevel=2,
             )
-        if resolved is None:
             return None, None
 
         with self._lock:
@@ -199,19 +206,39 @@ class VectorStore:
         project_files: List[Dict[str, Any]],
         project_id: str,
         log_callback: Optional[Any] = None,
+        force: bool = False,
     ) -> Dict[str, int]:
         """
         Encode files in batches and store directly in Postgres via PgVectorStore.
+        When force=False (default), inspects reindex plan and encodes only missing or stale files.
         """
         batch_size = 32
         code_files: List[Dict[str, Any]] = []
         text_files: List[Dict[str, Any]] = []
         skipped_ids: List[str] = []
-        
+        excluded_ids: List[str] = []
+
+        from plagiarism_engine.file_policy import is_scannable
+
+        needed_paths = None
+        if not force:
+            plan = self.get_reindex_plan(project_id)
+            needed_paths = set(plan["missing"] + plan["stale"])
+            if not needed_paths:
+                if log_callback:
+                    _safe_log(log_callback, f"  ✅ [Postgres] Project '{project_id}' is already fully indexed.")
+                return {"code": 0, "text": 0}
+
         for file_rec in project_files:
+            rel = file_rec.get('relative_path', file_rec.get('filename', ''))
+            if not is_scannable(rel)[0]:
+                # Config / template / log / data files (legacy rows) are never embedded.
+                excluded_ids.append(f"{project_id}::{rel}")
+                continue
+            if not force and needed_paths is not None and rel not in needed_paths:
+                continue
             content = file_rec.get('content', '')
             if not content or not content.strip():
-                rel = file_rec.get('relative_path', file_rec.get('filename', ''))
                 skipped_ids.append(f"{project_id}::{rel}")
                 continue
             if file_rec.get('file_type', 'text') == 'code':
@@ -226,6 +253,8 @@ class VectorStore:
             added["text"] = self._encode_and_add(text_files, project_id, "text", batch_size, log_callback)
         if skipped_ids:
             self.pg_store.mark_skipped(skipped_ids)
+        if excluded_ids:
+            self.pg_store.mark_skipped(excluded_ids, marker=self.pg_store.EXCLUDED_MARKER)
 
         if log_callback:
             _safe_log(
@@ -295,14 +324,22 @@ class VectorStore:
     def count_project_vectors(self, project_id: str) -> int:
         return self.pg_store.count_project_vectors(project_id)
 
-    def needs_reindex(self, project_id: str) -> bool:
+    def get_reindex_plan(self, project_id: str) -> Dict[str, Any]:
+        """Classify files of project_id into missing, stale, valid, and skipped."""
+        expected = {
+            "code": expected_model_for_domain("code"),
+            "text": expected_model_for_domain("text"),
+        }
+        return self.pg_store.get_reindex_plan(project_id, expected)
+
+    def needs_reindex(self, project_id: str, detail: bool = False) -> Any:
         """True if the project has no vectors, or any vector was produced by a model other than
         the one currently expected for its file_type (e.g. legacy CodeBERT rows, untagged rows)."""
         expected = {
             "code": expected_model_for_domain("code"),
             "text": expected_model_for_domain("text"),
         }
-        return self.pg_store.needs_reindex(project_id, expected)
+        return self.pg_store.needs_reindex(project_id, expected, detail=detail)
 
     def search_bulk(self, project_id: str, top_k: int = DEFAULT_TOP_K) -> List[Dict[str, Any]]:
         return self.pg_store.search_bulk(project_id, top_k)

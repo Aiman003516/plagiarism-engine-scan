@@ -58,6 +58,27 @@ class SettingsStoreMixin:
         finally:
             conn.close()
 
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        """Return a single setting parsed from JSON, or default if missing."""
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor()
+            k = clean_str(key)
+            if self.mode == "postgresql":
+                cur.execute("SELECT value FROM settings WHERE key = %s LIMIT 1;", (k,))
+            else:
+                cur.execute("SELECT value FROM settings WHERE key = ? LIMIT 1;", (k,))
+            row = cur.fetchone()
+            if not row:
+                return default
+            val = row['value'] if (isinstance(row, dict) or hasattr(row, 'keys')) else row[0]
+            try:
+                return json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                return val
+        finally:
+            conn.close()
+
     def update_settings(self, settings: Dict[str, Any]) -> None:
         """Bulk update settings. Values are JSON-encoded before storage."""
         conn = self._get_connection()

@@ -65,6 +65,7 @@ temp/
 *.zip
 dummy_project.zip
 dummy_project_dir/
+real_corpus_eval/
 
 # Media / Screenshots
 test_screenshots/
@@ -91,3 +92,5 @@ server_err.log
 server_out.log
 bench_faiss_before.py
 verify_upload_perf.py
+scratch/
+

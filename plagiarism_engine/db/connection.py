@@ -9,7 +9,7 @@ try:
 except ImportError:
     pass
 
-from .helpers import HAS_PSYCOPG2, DEFAULT_PG_URL
+from .helpers import HAS_PSYCOPG2, DEFAULT_PG_URL, get_database_url
 
 _DEFAULT_URL_WARNED = False
 
@@ -64,10 +64,12 @@ class ConnectionMixin:
     """Connection management: constructor, PostgreSQL bootstrap, SQLite fallback. Mixed into SystemDBStore."""
 
     def __init__(self, pg_connection_string: Optional[str] = None, sqlite_db_path: str = "./system_db.sqlite"):
-        env_url = os.getenv("DATABASE_URL")
-        self.pg_conn_str = pg_connection_string or env_url or DEFAULT_PG_URL
-        if not pg_connection_string and not env_url:
-            _warn_default_url_once()
+        if pg_connection_string:
+            self.pg_conn_str = pg_connection_string
+        else:
+            self.pg_conn_str = get_database_url()
+            if not os.getenv("DATABASE_URL"):
+                _warn_default_url_once()
         self.sqlite_path = sqlite_db_path
         self.mode = "sqlite"
         self.pool = None

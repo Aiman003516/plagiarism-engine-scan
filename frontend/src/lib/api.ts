@@ -3,6 +3,8 @@
  * Connects the frontend Vite React to the FastAPI backend (http://127.0.0.1:8000).
  */
 
+import { useScanStore } from "./scanStore";
+
 export const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "http://127.0.0.1:8000";
 
 /**
@@ -168,12 +170,17 @@ export interface PlagiarismComparison {
   fusion_score?: number;
   alpha?: number;
   type: string;
-  status: "SAFE" | "LOW" | "HIGH" | "CRITICAL" | "Safe" | "Moderate" | "FLAGGED";
+  status: "SAFE" | "LOW" | "HIGH" | "CRITICAL";
   submitted_snippet?: string;
   matched_snippet?: string;
   file1?: string;
   file2?: string;
   loc_matched?: number;
+  shared_fingerprints?: number;
+  lexical_evidence?: boolean;
+  containment_score?: number;
+  embedded_copy?: boolean;
+  rule?: string;
 }
 
 export interface GitCommitInfo {
@@ -205,7 +212,7 @@ export interface PlagiarismScanResult {
   overall_similarity: number;
   code_similarity: number;
   text_similarity: number;
-  verdict: "SAFE" | "LOW" | "HIGH" | "CRITICAL" | "FLAGGED";
+  verdict: "SAFE" | "LOW" | "HIGH" | "CRITICAL";
   threshold: number;
   comparisons: PlagiarismComparison[];
   logs?: string[];
@@ -216,6 +223,7 @@ export interface PlagiarismScanResult {
   total_loc?: number;
   languages_detected?: string[];
   timestamp: string;
+  excluded_files?: string[];
 }
 
 export interface PlagiarismHistoryItem {
@@ -225,7 +233,7 @@ export interface PlagiarismHistoryItem {
   overall_similarity: number;
   code_similarity: number;
   text_similarity: number;
-  verdict: "SAFE" | "FLAGGED";
+  verdict: "SAFE" | "LOW" | "HIGH" | "CRITICAL";
   total_files: number;
   total_loc: number;
   timestamp: string;
@@ -354,6 +362,100 @@ export const plagiarismApi = {
       }),
     }),
 
+  scanSavedProjectStream: async (
+    target: string,
+    scanType = "Saved Project Scan",
+    onLog: (logText: string) => void,
+    onComplete: (result: PlagiarismScanResult) => void,
+    onError: (errorText: string) => void,
+    signal?: AbortSignal,
+    onSession?: (session: ScanStreamSession) => void
+  ) => {
+    const url = `${API_BASE_URL}/api/plagiarism/scan-stream`;
+    const token = localStorage.getItem("auth_token");
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 600000);
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ target, scan_type: scanType }),
+        signal: signal || controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const errText = await res.text();
+        try {
+          const parsed = JSON.parse(errText);
+          throw new Error(parsed.detail || errText);
+        } catch {
+          throw new Error(errText || `HTTP error ${res.status}`);
+        }
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No readable stream in response");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let streamCompleted = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const block of lines) {
+          const trimmed = block.trim();
+          if (trimmed.startsWith("data:")) {
+            const jsonStr = trimmed.replace(/^data:\s*/, "");
+            try {
+              const msg = JSON.parse(jsonStr);
+              if (msg.type === "session" && msg.stream_token) {
+                onSession?.(msg as ScanStreamSession);
+              } else if (msg.type === "log" && msg.text) {
+                onLog(msg.text);
+              } else if (msg.type === "complete" && msg.result) {
+                streamCompleted = true;
+                onComplete(msg.result);
+              } else if (msg.type === "error" && msg.message) {
+                streamCompleted = true;
+                onError(msg.message);
+              }
+            } catch (e) {
+              console.error("SSE parse error", e, block);
+            }
+          }
+        }
+      }
+      if (!streamCompleted) {
+        const store = useScanStore.getState();
+        if (store.streamToken && store.activeProjectId) {
+          useScanStore.getState().setAbortController(null);
+          return;
+        }
+        onError("Stream ended unexpectedly.");
+      }
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      const store = useScanStore.getState();
+      if (store.streamToken && store.activeProjectId) {
+        useScanStore.getState().setAbortController(null);
+        return;
+      }
+      onError(err?.message || "Streaming connection failed");
+    }
+  },
+
   uploadAndScan: (projectName: string, files: Array<{ file?: File; path?: string; content?: string }>, scanType = "project") => {
     const formData = new FormData();
     formData.append("project_name", projectName);
@@ -387,7 +489,7 @@ export const plagiarismApi = {
     formData.append("project_name", projectName);
     formData.append("scan_type", scanType);
     files.forEach(f => {
-      if (f.file) formData.append("files", f.file);
+      if (f.file) formData.append("files", f.file, f.path || f.file.name);
       else if (f.content && f.path) formData.append("files", new Blob([f.content]), f.path);
     });
 
@@ -452,10 +554,20 @@ export const plagiarismApi = {
         }
       }
       if (!streamCompleted) {
+        const store = useScanStore.getState();
+        if (store.streamToken && store.activeProjectId) {
+          useScanStore.getState().setAbortController(null);
+          return;
+        }
         onError("Stream ended unexpectedly. The backend may have encountered an error.");
       }
     } catch (err: any) {
       clearTimeout(timeoutId);
+      const store = useScanStore.getState();
+      if (store.streamToken && store.activeProjectId) {
+        useScanStore.getState().setAbortController(null);
+        return;
+      }
       onError(err?.message || "Streaming connection failed");
     }
   },
@@ -535,9 +647,19 @@ export const plagiarismApi = {
         }
       }
       if (!streamCompleted) {
+        const store = useScanStore.getState();
+        if (store.streamToken && store.activeProjectId) {
+          useScanStore.getState().setAbortController(null);
+          return;
+        }
         onError("Stream ended unexpectedly. The backend may have encountered an error.");
       }
     } catch (err: any) {
+      const store = useScanStore.getState();
+      if (store.streamToken && store.activeProjectId) {
+        useScanStore.getState().setAbortController(null);
+        return;
+      }
       onError(err?.message || "Streaming connection failed");
     }
   },
@@ -618,9 +740,19 @@ export const plagiarismApi = {
         }
       }
       if (!streamCompleted) {
+        const store = useScanStore.getState();
+        if (store.streamToken && store.activeProjectId) {
+          useScanStore.getState().setAbortController(null);
+          return;
+        }
         onError("Stream ended unexpectedly. The backend may have encountered an error.");
       }
     } catch (err: any) {
+      const store = useScanStore.getState();
+      if (store.streamToken && store.activeProjectId) {
+        useScanStore.getState().setAbortController(null);
+        return;
+      }
       onError(err?.message || "Git Streaming connection failed");
     }
   },
@@ -768,6 +900,8 @@ export interface DashboardStats {
   total_files: number;
   recent_scans: Array<Record<string, any>>;
   flagged_count: number;
+  safe_projects?: number;
+  total_scans?: number;
   average_fusion_score?: number;
   verdicts_distribution?: { SAFE: number; LOW: number; HIGH: number; CRITICAL: number; FLAGGED: number; };
 }

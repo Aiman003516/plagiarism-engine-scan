@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { UserCog, RefreshCw, Search, Trash2, Plus, Loader2 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { usersApi, UserProfileData } from "../lib/api";
+import { useUsersCache } from "../lib/useUsersCache";
 
 const ROLES = [
   { value: "ministry_admin", label: "Ministry Admin" },
@@ -12,10 +13,9 @@ const ROLES = [
 
 export default function Users() {
   const { t } = useTranslation();
-  const [users, setUsers] = useState<UserProfileData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
+  const { users, loading, error, refresh: load } = useUsersCache(roleFilter || undefined);
+  const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [page, setPage] = useState(1);
@@ -27,23 +27,6 @@ export default function Users() {
     role: "college_admin",
     college_id: "",
   });
-
-  const load = async () => {
-    setLoading(true);
-    try {
-      const res = await usersApi.getAll(roleFilter ? { role: roleFilter } : undefined);
-      setUsers(res.users || []);
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to load users");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roleFilter]);
 
   const createUser = async () => {
     if (!form.name.trim() || !form.email.trim() || !form.password) {
