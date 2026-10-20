@@ -11,6 +11,7 @@ import {
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { plagiarismApi, ProjectSummary, ProjectFile } from "../lib/api";
+import { useProjectsCache } from "../lib/useProjectsCache";
 
 export default function Projects() {
   const { t } = useTranslation();
@@ -74,7 +75,7 @@ export default function Projects() {
     }
   };
 
-  const filtered = projects.filter((p) => {
+  const filtered = projects.filter((p: ProjectSummary) => {
     // Students only ever see their own submissions; staff/admins see everything.
     if (isStudent && p.student_id !== user?.id) return false;
 
@@ -135,7 +136,7 @@ export default function Projects() {
                 </tr>
               </thead>
               <tbody>
-                {paged.map((p) => (
+                {paged.map((p: ProjectSummary) => (
                   <tr key={p.id} className="hover:bg-surface/50 transition-colors border-b border-border/40 last:border-0">
                     <td className="py-3 px-4">
                       <div className="flex items-start gap-3">

@@ -16,11 +16,14 @@ import { ComparisonsTable } from './plagiarism/ComparisonsTable';
 import { DeepScanPanel } from './plagiarism/DeepScanPanel';
 import { ScanProgress } from './plagiarism/ScanProgress';
 import { useScanStore } from '../lib/scanStore';
-import { handleStreamSession } from './plagiarism/hooks/useScanStream';
+import { handleStreamSession, useScanStreamReconnection } from './plagiarism/hooks/useScanStream';
 import { useProjectsCache } from '../lib/useProjectsCache';
 
 export function PlagiarismAnalysis() {
   const location = useLocation();
+  // Re-attach scan stream if a scanner scan is in flight
+  useScanStreamReconnection("scanner");
+
   const {
     projects: savedProjects,
     loading: loadingProjects,
@@ -33,9 +36,9 @@ export function PlagiarismAnalysis() {
   const scanResult = useScanStore((s) => s.scanResult);
   const scanError = useScanStore((s) => s.scanError);
   const activeProjectId = useScanStore((s) => s.activeProjectId);
+  const scanDuration = useScanStore((s) => s.scanDuration) ?? 0;
 
   const [selectedProject, setSelectedProject] = useState<string>(() => activeProjectId || '');
-  const [scanDuration, setScanDuration] = useState<number>(0);
   const [deepScanLoading, setDeepScanLoading] = useState<string | null>(null);
   const [deepScanResult, setDeepScanResult] = useState<DeepScanResult | null>(null);
 
@@ -63,8 +66,8 @@ export function PlagiarismAnalysis() {
       const start = Date.now();
       plagiarismApi.getHistoryDetail(projParam)
         .then((res) => {
-          setScanDuration((Date.now() - start) / 1000);
-          useScanStore.getState().completeScan(res as PlagiarismScanResult);
+          const dur = (Date.now() - start) / 1000;
+          useScanStore.getState().completeScan(res as PlagiarismScanResult, dur);
         })
         .catch((e) => {
           useScanStore.getState().failScan(e.message || "Failed to load report");
@@ -115,7 +118,7 @@ export function PlagiarismAnalysis() {
   const runScan = async () => {
     if (!selectedProject) return;
 
-    useScanStore.getState().startScan(selectedProject);
+    useScanStore.getState().startScan(selectedProject, "scanner");
     const controller = new AbortController();
     useScanStore.getState().setAbortController(controller);
     const t0 = Date.now();
@@ -127,8 +130,7 @@ export function PlagiarismAnalysis() {
         (logText) => useScanStore.getState().noteServerLog(logText),
         (result) => {
           const duration = ((Date.now() - t0) / 1000);
-          setScanDuration(duration);
-          useScanStore.getState().completeScan(result);
+          useScanStore.getState().completeScan(result, duration);
           toast.success(`Analysis complete in ${duration.toFixed(1)}s`);
         },
         (errorText) => {
@@ -210,7 +212,7 @@ export function PlagiarismAnalysis() {
       </div>
 
       {/* Real-time Streaming Terminal */}
-      <ScanProgress />
+      <ScanProgress scope="scanner" />
 
       {/* Direct Project Comparison */}
       <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-8 shadow-sm">

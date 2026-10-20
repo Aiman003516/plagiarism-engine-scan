@@ -261,7 +261,7 @@ export function UploadSection() {
 
     const controller = new AbortController();
     useScanStore.getState().setAbortController(controller);
-    useScanStore.getState().startScan(activeProjectName);
+    useScanStore.getState().startScan(activeProjectName, 'intake');
     appendLog(`[${new Date().toLocaleTimeString()}] [INTAKE] Staging ${uploadedFiles.length} files (${formatFileSize(totalStagedSize)})`);
     appendLog(`[${new Date().toLocaleTimeString()}] [INTAKE] Checking project: ${activeProjectName}`);
 

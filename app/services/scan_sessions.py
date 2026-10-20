@@ -83,6 +83,7 @@ class ScanStreamSession:
             "type": "session",
             "project_id": self.project_id,
             "stream_token": self.stream_token,
+            "scan_started_at": int(self.created_at * 1000),
             "reconnect_url": (
                 f"/api/plagiarism/scan-stream/{self.project_id}"
                 f"?token={self.stream_token}"

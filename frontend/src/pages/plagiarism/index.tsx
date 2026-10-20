@@ -21,7 +21,7 @@ export function Plagiarism() {
   const navigate = useNavigate();
 
   // Re-attach scan stream if one is in flight
-  useScanStreamReconnection();
+  useScanStreamReconnection("intake");
 
   const [activeTab, setActiveTab] = useState<"direct" | "git">("direct");
 
@@ -138,7 +138,7 @@ export function Plagiarism() {
       {activeTab === "direct" && <UploadSection />}
       {activeTab === "git" && <GitScanSection />}
 
-      <ScanProgress />
+      <ScanProgress scope="intake" />
 
       {/* Database Scan History Modal */}
       <AnimatePresence>

@@ -28,7 +28,7 @@ export function GitScanSection() {
     const gitProjectName = gitProjectTitle.trim() || gitRepoUrl.trim();
     const controller = new AbortController();
     useScanStore.getState().setAbortController(controller);
-    useScanStore.getState().startScan(gitProjectName);
+    useScanStore.getState().startScan(gitProjectName, 'intake');
 
     const initialLogs = [
       `[${new Date().toLocaleTimeString()}] [GIT] Connecting to remote repository: ${gitRepoUrl.trim()}`,

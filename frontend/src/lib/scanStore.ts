@@ -8,6 +8,8 @@ const MAX_PERSISTED_LOGS = 400;
 /** A "running" scan older than this is dead, not resumable (server restart, sleep...). */
 const STALE_SCAN_MS = 2 * 60 * 60 * 1000;
 
+export type ScanSource = 'intake' | 'scanner';
+
 export interface UploadedFileInfo {
   id: string;
   path: string;
@@ -32,9 +34,12 @@ interface ScanStore {
 
   // --- Group B: Scan execution state (survives navigation) ---
   isScanning: boolean;
+  scanSource: ScanSource | null;
   scanLogs: string[];
   scanResult: PlagiarismScanResult | null;
   scanError: string | null;
+  scanDuration: number | null;
+  lastLogTimestamp: number | null;
 
   // --- Group C: Stream re-attach state (survives reloads & navigation) ---
   /** Project the in-flight scan belongs to; keys the backend stream session. */
@@ -57,8 +62,9 @@ interface ScanStore {
   appendLog: (text: string) => void;
   /** Append a line that came FROM the backend stream, advancing the resume cursor. */
   noteServerLog: (text: string) => void;
-  startScan: (projectName: string) => void;
-  completeScan: (result: PlagiarismScanResult) => void;
+  setScanSource: (source: ScanSource | null) => void;
+  startScan: (projectName: string, source?: ScanSource) => void;
+  completeScan: (result: PlagiarismScanResult, duration?: number) => void;
   failScan: (error: string) => void;
   resetScan: () => void;
   resetAll: () => void;
@@ -69,7 +75,7 @@ interface ScanStore {
 
   // Group C actions
   /** Store the reconnect capability delivered as the first frame of a scan stream. */
-  setStreamSession: (projectId: string, token: string) => void;
+  setStreamSession: (projectId: string, token: string, startedAt?: number) => void;
   /** Mark the store as re-attaching to an already-running scan for `projectId`. */
   reconnectScan: (projectId: string) => void;
   /** The live stream is gone (server restart / TTL): stop the spinner, keep the logs. */
@@ -92,9 +98,12 @@ export const useScanStore = create<ScanStore>()(persist((set) => ({
 
   // Group B defaults
   isScanning: false,
+  scanSource: null,
   scanLogs: [],
   scanResult: null,
   scanError: null,
+  scanDuration: null,
+  lastLogTimestamp: null,
   abortController: null,
 
   // Group C defaults
@@ -119,6 +128,7 @@ export const useScanStore = create<ScanStore>()(persist((set) => ({
   setBloatStats: (filtered, totalNodes) => set({ bloatFilteredCount: filtered, inspectedTotalNodes: totalNodes }),
 
   // Group B actions
+  setScanSource: (source) => set({ scanSource: source }),
   appendLog: (text) => set((s) => ({ scanLogs: [...s.scanLogs, text] })),
   // Server-originated lines advance the resume cursor, so a re-attach can ask the
   // backend to replay only what we missed (`?after=streamLogCount`) instead of
@@ -126,40 +136,46 @@ export const useScanStore = create<ScanStore>()(persist((set) => ({
   noteServerLog: (text) => set((s) => ({
     scanLogs: [...s.scanLogs, text],
     streamLogCount: s.streamLogCount + 1,
+    lastLogTimestamp: Date.now(),
   })),
-  startScan: (name) => set({
-    isScanning: true, scanLogs: [], scanResult: null, scanError: null, projectName: name,
+  startScan: (name, source = 'intake') => set({
+    isScanning: true, scanSource: source, scanLogs: [], scanResult: null, scanError: null, projectName: name,
     // A brand-new scan invalidates any previous reconnect capability.
-    activeProjectId: name, streamToken: null, scanStartedAt: Date.now(), isReconnecting: false,
+    activeProjectId: name, streamToken: null, scanStartedAt: Date.now(), scanDuration: null, lastLogTimestamp: Date.now(), isReconnecting: false,
     streamLogCount: 0,
   }),
-  completeScan: (result) => set({
+  completeScan: (result, duration) => set((s) => ({
     isScanning: false, isReconnecting: false, scanResult: result,
+    scanDuration: duration ?? (s.scanStartedAt ? (Date.now() - s.scanStartedAt) / 1000 : s.scanDuration),
     // Stream finished: drop the capability so we never re-attach to a dead stream.
     streamToken: null,
-  }),
-  failScan: (error) => set({ isScanning: false, isReconnecting: false, scanError: error, streamToken: null }),
+  })),
+  failScan: (error) => set((s) => ({
+    isScanning: false, isReconnecting: false, scanError: error,
+    scanDuration: s.scanStartedAt ? (Date.now() - s.scanStartedAt) / 1000 : s.scanDuration,
+    streamToken: null,
+  })),
   resetScan: () => set({
-    isScanning: false, scanLogs: [], scanResult: null, scanError: null, abortController: null,
-    activeProjectId: null, streamToken: null, scanStartedAt: null, isReconnecting: false,
+    isScanning: false, scanSource: null, scanLogs: [], scanResult: null, scanError: null, abortController: null,
+    activeProjectId: null, streamToken: null, scanStartedAt: null, scanDuration: null, lastLogTimestamp: null, isReconnecting: false,
     streamLogCount: 0,
   }),
   resetAll: () => set({
     uploadedFiles: [], projectName: '', isProcessingFiles: false, isTraversing: false,
     totalFilesToProcess: 0, processedFilesCount: 0, processingPhase: '',
     bloatFilteredCount: 0, inspectedTotalNodes: 0,
-    isScanning: false, scanLogs: [], scanResult: null, scanError: null, abortController: null,
-    activeProjectId: null, streamToken: null, scanStartedAt: null, isReconnecting: false,
+    isScanning: false, scanSource: null, scanLogs: [], scanResult: null, scanError: null, abortController: null,
+    activeProjectId: null, streamToken: null, scanStartedAt: null, scanDuration: null, lastLogTimestamp: null, isReconnecting: false,
     streamLogCount: 0,
   }),
   setAbortController: (c) => set({ abortController: c }),
 
   // Group C actions
-  setStreamSession: (projectId, token) => set({
+  setStreamSession: (projectId, token, startedAt) => set((s) => ({
     activeProjectId: projectId,
     streamToken: token,
-    scanStartedAt: Date.now(),
-  }),
+    scanStartedAt: startedAt ? startedAt : (s.scanStartedAt ?? Date.now()),
+  })),
 
   reconnectScan: (projectId) => set((s) => ({
     isScanning: true,
@@ -211,9 +227,12 @@ export const useScanStore = create<ScanStore>()(persist((set) => ({
     inspectedTotalNodes: s.inspectedTotalNodes,
     // Group B
     isScanning: s.isScanning,
+    scanSource: s.scanSource,
     scanLogs: s.scanLogs.slice(-MAX_PERSISTED_LOGS),
     scanResult: s.scanResult,
     scanError: s.scanError,
+    scanDuration: s.scanDuration,
+    lastLogTimestamp: s.lastLogTimestamp,
     // Group C — the reconnect capability
     activeProjectId: s.activeProjectId,
     streamToken: s.streamToken,

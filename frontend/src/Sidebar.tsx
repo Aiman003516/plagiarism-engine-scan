@@ -53,6 +53,7 @@ function Sidebar() {
   const location = useLocation();
   const [isDark, toggleDarkMode] = useDarkMode();
   const isScanning = useScanStore((s) => s.isScanning);
+  const scanSource = useScanStore((s) => s.scanSource);
   const user = (() => {
     try {
       const u = localStorage.getItem("user_data");
@@ -89,7 +90,7 @@ function Sidebar() {
             >
               <Icon className="w-5 h-5 flex-shrink-0" />
               <span className="hidden md:inline">{label}</span>
-              {to === "/" && isScanning && (
+              {isScanning && ((to === "/" && scanSource === "intake") || (to === "/scan" && scanSource === "scanner")) && (
                 <span className="ml-auto hidden md:flex h-2 w-2 relative" title="Scan actively processing">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>

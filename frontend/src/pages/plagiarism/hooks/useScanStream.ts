@@ -45,7 +45,11 @@ export async function readZipScanStream(
 
     if (event.type === "session" && event.project_id && event.stream_token) {
       // Reconnect capability: lets the UI re-attach after navigation/reload.
-      onSession?.({ project_id: event.project_id, stream_token: event.stream_token });
+      onSession?.({
+        project_id: event.project_id,
+        stream_token: event.stream_token,
+        scan_started_at: (event as any).scan_started_at,
+      });
     } else if (event.type === "log" && typeof event.text === "string") {
       onLog(event.text);
     } else if (event.type === "complete") {
@@ -100,10 +104,11 @@ export async function readZipScanStream(
   return finalResult;
 }
 
-export function useScanStreamReconnection() {
+export function useScanStreamReconnection(scope?: "intake" | "scanner") {
   const { t } = useTranslation();
 
   const isScanning = useScanStore((s) => s.isScanning);
+  const scanSource = useScanStore((s) => s.scanSource);
   const activeProjectId = useScanStore((s) => s.activeProjectId);
   const streamToken = useScanStore((s) => s.streamToken);
   const abortController = useScanStore((s) => s.abortController);
@@ -111,6 +116,7 @@ export function useScanStreamReconnection() {
   // --- Resume an in-flight scan after navigating away or reloading -------------
   useEffect(() => {
     if (!isScanning || !activeProjectId || !streamToken || abortController) return;
+    if (scope && scanSource && scanSource !== scope) return;
 
     useScanStore.getState().reconnectScan(activeProjectId);
 
@@ -177,5 +183,5 @@ export function useScanStreamReconnection() {
 }
 
 export const handleStreamSession = (session: ScanStreamSession) => {
-  useScanStore.getState().setStreamSession(session.project_id, session.stream_token);
+  useScanStore.getState().setStreamSession(session.project_id, session.stream_token, session.scan_started_at);
 };

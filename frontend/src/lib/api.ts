@@ -18,6 +18,7 @@ export interface ScanStreamSession {
   project_id: string;
   stream_token: string;
   reconnect_url?: string;
+  scan_started_at?: number;
 }
 
 /** Absolute `EventSource` URL used to resume listening to a running scan.
