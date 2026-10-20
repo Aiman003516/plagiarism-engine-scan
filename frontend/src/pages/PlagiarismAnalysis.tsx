@@ -10,8 +10,10 @@ import {
   PlagiarismComparison,
   PlagiarismScanResult,
   DirectCompareFilesResult,
+  ProjectFile,
 } from '../lib/api';
-import { UploadCloud, FileText, CheckCircle2, Scale } from 'lucide-react';
+import { UploadCloud, FileText, CheckCircle2, Scale, History, FolderOpen } from 'lucide-react';
+import { ScanHistoryModal } from './plagiarism/ScanHistoryModal';
 import DiffViewer from '../components/DiffViewer';
 import { SummaryCards } from './plagiarism/SummaryCards';
 import { ComparisonsTable } from './plagiarism/ComparisonsTable';
@@ -41,16 +43,34 @@ export function PlagiarismAnalysis() {
   const activeProjectId = useScanStore((s) => s.activeProjectId);
   const scanDuration = useScanStore((s) => s.scanDuration) ?? 0;
 
-  // Direct Two-File / Document Pair Comparison state
+  // Deep scan store integration (concurrent scans + persistent cache)
+  const activeDeepScans = useScanStore((s) => s.activeDeepScans) || [];
+  const deepScanResultsCache = useScanStore((s) => s.deepScanResultsCache) || {};
+
+  // Scan History Modal state
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+  // Direct Two-File / Document Pair Comparison state (Upload or Database)
+  const [modeA, setModeA] = useState<'upload' | 'database'>('upload');
+  const [modeB, setModeB] = useState<'upload' | 'database'>('upload');
   const [fileA, setFileA] = useState<File | null>(null);
   const [fileB, setFileB] = useState<File | null>(null);
+  const [dbProjectA, setDbProjectA] = useState<string>('');
+  const [dbFileA, setDbFileA] = useState<string>('');
+  const [projectAFiles, setProjectAFiles] = useState<ProjectFile[]>([]);
+  const [loadingFilesA, setLoadingFilesA] = useState(false);
+
+  const [dbProjectB, setDbProjectB] = useState<string>('');
+  const [dbFileB, setDbFileB] = useState<string>('');
+  const [projectBFiles, setProjectBFiles] = useState<ProjectFile[]>([]);
+  const [loadingFilesB, setLoadingFilesB] = useState(false);
+
   const [isComparingFiles, setIsComparingFiles] = useState(false);
   const [directResult, setDirectResult] = useState<DirectCompareFilesResult | null>(null);
   const [directError, setDirectError] = useState<string | null>(null);
   const [showDirectDiffModal, setShowDirectDiffModal] = useState(false);
 
   const [selectedProject, setSelectedProject] = useState<string>(() => activeProjectId || '');
-  const [deepScanLoading, setDeepScanLoading] = useState<string | null>(null);
   const [deepScanResult, setDeepScanResult] = useState<DeepScanResult | null>(null);
 
   // Keep selectedProject aligned if an active scan is running
@@ -87,12 +107,18 @@ export function PlagiarismAnalysis() {
     }
   }, [location.search]);
 
-  // Run a deep AI semantic scan on a matched file pair.
+  // Run a deep AI semantic scan on a matched file pair (concurrent + cached).
   const runDeepScan = async (cmp: PlagiarismComparison) => {
     if (!scanResult) return;
     const file2 = cmp.file2 || cmp.matched_file || '';
     const key = `${cmp.file1}::${file2}`;
-    setDeepScanLoading(key);
+
+    if (deepScanResultsCache[key]) {
+      setDeepScanResult(deepScanResultsCache[key]);
+      return;
+    }
+
+    useScanStore.getState().addActiveDeepScan(key);
     try {
       const res = await plagiarismApi.deepScan({
         project_id: scanResult.project_name || scanResult.target || '',
@@ -100,22 +126,69 @@ export function PlagiarismAnalysis() {
         other_project_id: cmp.project,
         file2_path: file2,
       });
+      useScanStore.getState().cacheDeepScanResult(key, res);
       setDeepScanResult(res);
+      toast.success(`Deep scan complete for ${file2}`);
     } catch (e: any) {
       toast.error(e?.message || 'Deep scan failed');
     } finally {
-      setDeepScanLoading(null);
+      useScanStore.getState().removeActiveDeepScan(key);
     }
   };
 
-  // Direct pairwise comparison between two standalone uploaded files/documents
+  // Load files when DB project changes
+  const handleSelectDbProjectA = async (projId: string) => {
+    setDbProjectA(projId);
+    setDbFileA('');
+    if (!projId) {
+      setProjectAFiles([]);
+      return;
+    }
+    setLoadingFilesA(true);
+    try {
+      const res = await plagiarismApi.getProjectFiles(projId);
+      setProjectAFiles(res.files || []);
+    } catch {
+      toast.error('Failed to load files for Project A');
+    } finally {
+      setLoadingFilesA(false);
+    }
+  };
+
+  const handleSelectDbProjectB = async (projId: string) => {
+    setDbProjectB(projId);
+    setDbFileB('');
+    if (!projId) {
+      setProjectBFiles([]);
+      return;
+    }
+    setLoadingFilesB(true);
+    try {
+      const res = await plagiarismApi.getProjectFiles(projId);
+      setProjectBFiles(res.files || []);
+    } catch {
+      toast.error('Failed to load files for Project B');
+    } finally {
+      setLoadingFilesB(false);
+    }
+  };
+
+  // Direct pairwise comparison between two files/documents (upload or db)
   const runDirectFileComparison = async () => {
-    if (!fileA || !fileB) return;
+    const hasA = modeA === 'upload' ? Boolean(fileA) : Boolean(dbProjectA && dbFileA);
+    const hasB = modeB === 'upload' ? Boolean(fileB) : Boolean(dbProjectB && dbFileB);
+    if (!hasA || !hasB) return;
+
     setIsComparingFiles(true);
     setDirectResult(null);
     setDirectError(null);
     try {
-      const res = await plagiarismApi.compareDirectFiles(fileA, fileB);
+      const res = await plagiarismApi.compareDirectFiles(
+        modeA === 'upload' ? fileA : null,
+        modeB === 'upload' ? fileB : null,
+        modeA === 'database' ? { projectId: dbProjectA, filePath: dbFileA } : null,
+        modeB === 'database' ? { projectId: dbProjectB, filePath: dbFileB } : null
+      );
       setDirectResult(res);
       toast.success(`Pairwise comparison complete: ${res.similarity}% similarity`);
     } catch (e: any) {
@@ -179,6 +252,26 @@ export function PlagiarismAnalysis() {
 
   return (
     <div className="space-y-6 pb-12">
+      {/* Top Header with History Action */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-text-main flex items-center gap-2.5">
+            <Database className="w-7 h-7 text-primary" />
+            Plagiarism Scanner & Analysis
+          </h1>
+          <p className="text-text-muted text-sm mt-0.5">
+            Run system-wide scans, inspect direct pairwise file comparisons, or review past audit logs.
+          </p>
+        </div>
+        <button
+          onClick={() => setIsHistoryOpen(true)}
+          className="bg-surface hover:bg-surface-hover border border-border rounded-xl px-4 py-2.5 flex items-center gap-2 text-xs font-semibold text-text-main transition-colors shrink-0 shadow-sm self-start sm:self-auto"
+        >
+          <History className="w-4 h-4 text-primary" />
+          Scan History & Audit Logs
+        </button>
+      </div>
+
       {/* Scanner Card */}
       <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-8 flex flex-col items-center shadow-sm">
         <Database className="w-16 h-16 text-primary mb-4" />
@@ -255,83 +348,199 @@ export function PlagiarismAnalysis() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           {/* File A Box */}
-          <div className="border-2 border-dashed border-border dark:border-slate-700 rounded-xl p-5 flex flex-col items-center justify-center text-center hover:border-primary/50 transition-colors bg-surface/30">
-            <input
-              type="file"
-              id="direct-file-a"
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files?.[0]) {
-                  setFileA(e.target.files[0]);
-                  setDirectResult(null);
-                  setDirectError(null);
-                }
-              }}
-            />
-            {fileA ? (
-              <div className="flex flex-col items-center gap-2">
-                <FileText className="w-8 h-8 text-primary" />
-                <span className="font-semibold text-text-main text-sm max-w-[240px] truncate" title={fileA.name}>{fileA.name}</span>
-                <span className="text-xs text-text-muted">{(fileA.size / 1024).toFixed(1)} KB</span>
+          <div className="rounded-xl p-4 border border-border dark:border-slate-700 bg-surface/30 flex flex-col">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-text-main">Document / File A</span>
+              <div className="flex rounded-lg bg-surface border border-border p-0.5 text-xs">
                 <button
                   type="button"
-                  onClick={() => { setFileA(null); setDirectResult(null); }}
-                  className="mt-2 text-xs text-red-500 hover:underline"
+                  onClick={() => { setModeA('upload'); setDbProjectA(''); setDbFileA(''); }}
+                  className={`px-2.5 py-1 rounded-md font-medium text-xs transition-all ${modeA === 'upload' ? 'bg-primary text-primary-text shadow-sm' : 'text-text-muted hover:text-text-main'}`}
                 >
-                  Remove File A
+                  Upload
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setModeA('database'); setFileA(null); }}
+                  className={`px-2.5 py-1 rounded-md font-medium text-xs transition-all ${modeA === 'database' ? 'bg-primary text-primary-text shadow-sm' : 'text-text-muted hover:text-text-main'}`}
+                >
+                  Database
                 </button>
               </div>
+            </div>
+
+            {modeA === 'upload' ? (
+              <div className="border-2 border-dashed border-border dark:border-slate-700 rounded-xl p-4 flex-1 flex flex-col items-center justify-center text-center hover:border-primary/50 transition-colors bg-surface/20 min-h-[140px]">
+                <input
+                  type="file"
+                  id="direct-file-a"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      setFileA(e.target.files[0]);
+                      setDirectResult(null);
+                      setDirectError(null);
+                    }
+                  }}
+                />
+                {fileA ? (
+                  <div className="flex flex-col items-center gap-1.5">
+                    <FileText className="w-7 h-7 text-primary" />
+                    <span className="font-semibold text-text-main text-xs max-w-[220px] truncate" title={fileA.name}>{fileA.name}</span>
+                    <span className="text-[11px] text-text-muted">{(fileA.size / 1024).toFixed(1)} KB</span>
+                    <button
+                      type="button"
+                      onClick={() => { setFileA(null); setDirectResult(null); }}
+                      className="text-xs text-red-500 hover:underline mt-1"
+                    >
+                      Remove File A
+                    </button>
+                  </div>
+                ) : (
+                  <label htmlFor="direct-file-a" className="cursor-pointer flex flex-col items-center gap-1.5">
+                    <UploadCloud className="w-7 h-7 text-text-muted" />
+                    <span className="text-xs font-semibold text-text-main">Choose or drop File A</span>
+                    <span className="text-[11px] text-text-muted">PDF, DOCX, Code, or Text</span>
+                  </label>
+                )}
+              </div>
             ) : (
-              <label htmlFor="direct-file-a" className="cursor-pointer flex flex-col items-center gap-2">
-                <UploadCloud className="w-8 h-8 text-text-muted" />
-                <span className="text-sm font-medium text-text-main">Select Document / File A</span>
-                <span className="text-xs text-text-muted">PDF, DOCX, Code, or Text</span>
-              </label>
+              <div className="space-y-3 flex-1 flex flex-col justify-center min-h-[140px]">
+                <div>
+                  <label className="block text-[11px] text-text-muted mb-1">Select Project</label>
+                  <select
+                    value={dbProjectA}
+                    onChange={(e) => handleSelectDbProjectA(e.target.value)}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text-main outline-none focus:ring-1 focus:ring-primary/30"
+                  >
+                    <option value="">Choose a database project...</option>
+                    {savedProjects.map((p) => (
+                      <option key={`pa-${p.id}`} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] text-text-muted mb-1">Select File in Project</label>
+                  <select
+                    disabled={!dbProjectA || loadingFilesA}
+                    value={dbFileA}
+                    onChange={(e) => { setDbFileA(e.target.value); setDirectResult(null); }}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text-main outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+                  >
+                    <option value="">
+                      {loadingFilesA ? 'Loading project files...' : !dbProjectA ? 'Select project first' : 'Choose a file...'}
+                    </option>
+                    {projectAFiles.map((f, i) => (
+                      <option key={`fa-${i}`} value={f.relative_path}>{f.relative_path}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             )}
           </div>
 
           {/* File B Box */}
-          <div className="border-2 border-dashed border-border dark:border-slate-700 rounded-xl p-5 flex flex-col items-center justify-center text-center hover:border-primary/50 transition-colors bg-surface/30">
-            <input
-              type="file"
-              id="direct-file-b"
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files?.[0]) {
-                  setFileB(e.target.files[0]);
-                  setDirectResult(null);
-                  setDirectError(null);
-                }
-              }}
-            />
-            {fileB ? (
-              <div className="flex flex-col items-center gap-2">
-                <FileText className="w-8 h-8 text-emerald-500" />
-                <span className="font-semibold text-text-main text-sm max-w-[240px] truncate" title={fileB.name}>{fileB.name}</span>
-                <span className="text-xs text-text-muted">{(fileB.size / 1024).toFixed(1)} KB</span>
+          <div className="rounded-xl p-4 border border-border dark:border-slate-700 bg-surface/30 flex flex-col">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-text-main">Document / File B</span>
+              <div className="flex rounded-lg bg-surface border border-border p-0.5 text-xs">
                 <button
                   type="button"
-                  onClick={() => { setFileB(null); setDirectResult(null); }}
-                  className="mt-2 text-xs text-red-500 hover:underline"
+                  onClick={() => { setModeB('upload'); setDbProjectB(''); setDbFileB(''); }}
+                  className={`px-2.5 py-1 rounded-md font-medium text-xs transition-all ${modeB === 'upload' ? 'bg-primary text-primary-text shadow-sm' : 'text-text-muted hover:text-text-main'}`}
                 >
-                  Remove File B
+                  Upload
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setModeB('database'); setFileB(null); }}
+                  className={`px-2.5 py-1 rounded-md font-medium text-xs transition-all ${modeB === 'database' ? 'bg-primary text-primary-text shadow-sm' : 'text-text-muted hover:text-text-main'}`}
+                >
+                  Database
                 </button>
               </div>
+            </div>
+
+            {modeB === 'upload' ? (
+              <div className="border-2 border-dashed border-border dark:border-slate-700 rounded-xl p-4 flex-1 flex flex-col items-center justify-center text-center hover:border-primary/50 transition-colors bg-surface/20 min-h-[140px]">
+                <input
+                  type="file"
+                  id="direct-file-b"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      setFileB(e.target.files[0]);
+                      setDirectResult(null);
+                      setDirectError(null);
+                    }
+                  }}
+                />
+                {fileB ? (
+                  <div className="flex flex-col items-center gap-1.5">
+                    <FileText className="w-7 h-7 text-emerald-500" />
+                    <span className="font-semibold text-text-main text-xs max-w-[220px] truncate" title={fileB.name}>{fileB.name}</span>
+                    <span className="text-[11px] text-text-muted">{(fileB.size / 1024).toFixed(1)} KB</span>
+                    <button
+                      type="button"
+                      onClick={() => { setFileB(null); setDirectResult(null); }}
+                      className="text-xs text-red-500 hover:underline mt-1"
+                    >
+                      Remove File B
+                    </button>
+                  </div>
+                ) : (
+                  <label htmlFor="direct-file-b" className="cursor-pointer flex flex-col items-center gap-1.5">
+                    <UploadCloud className="w-7 h-7 text-text-muted" />
+                    <span className="text-xs font-semibold text-text-main">Choose or drop File B</span>
+                    <span className="text-[11px] text-text-muted">PDF, DOCX, Code, or Text</span>
+                  </label>
+                )}
+              </div>
             ) : (
-              <label htmlFor="direct-file-b" className="cursor-pointer flex flex-col items-center gap-2">
-                <UploadCloud className="w-8 h-8 text-text-muted" />
-                <span className="text-sm font-medium text-text-main">Select Document / File B</span>
-                <span className="text-xs text-text-muted">PDF, DOCX, Code, or Text</span>
-              </label>
+              <div className="space-y-3 flex-1 flex flex-col justify-center min-h-[140px]">
+                <div>
+                  <label className="block text-[11px] text-text-muted mb-1">Select Project</label>
+                  <select
+                    value={dbProjectB}
+                    onChange={(e) => handleSelectDbProjectB(e.target.value)}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text-main outline-none focus:ring-1 focus:ring-primary/30"
+                  >
+                    <option value="">Choose a database project...</option>
+                    {savedProjects.map((p) => (
+                      <option key={`pb-${p.id}`} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] text-text-muted mb-1">Select File in Project</label>
+                  <select
+                    disabled={!dbProjectB || loadingFilesB}
+                    value={dbFileB}
+                    onChange={(e) => { setDbFileB(e.target.value); setDirectResult(null); }}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-xs text-text-main outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+                  >
+                    <option value="">
+                      {loadingFilesB ? 'Loading project files...' : !dbProjectB ? 'Select project first' : 'Choose a file...'}
+                    </option>
+                    {projectBFiles.map((f, i) => (
+                      <option key={`fb-${i}`} value={f.relative_path}>{f.relative_path}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             )}
           </div>
         </div>
 
         <div className="flex justify-end">
           <button
-            disabled={!fileA || !fileB || isComparingFiles}
+            disabled={
+              isComparingFiles ||
+              (modeA === 'upload' ? !fileA : !dbProjectA || !dbFileA) ||
+              (modeB === 'upload' ? !fileB : !dbProjectB || !dbFileB)
+            }
             onClick={runDirectFileComparison}
-            className="bg-primary hover:bg-primary-hover text-primary-text px-6 py-2.5 rounded-lg font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+            className="bg-primary hover:bg-primary-hover text-primary-text px-6 py-2.5 rounded-lg font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 text-xs shadow-sm"
           >
             {isComparingFiles ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Scale className="w-4 h-4" />}
             {isComparingFiles ? 'Comparing Files...' : 'Compare Two Files'}
@@ -522,12 +731,22 @@ export function PlagiarismAnalysis() {
 
       {/* Error Display */}
       {scanError && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 text-red-600 dark:text-red-400">
-          <div className="flex items-center gap-2 font-bold mb-2">
-            <AlertTriangle className="w-5 h-5" />
-            Scan Failed
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-5 text-red-600 dark:text-red-400 flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold text-sm">Scan Notification</div>
+              <p className="text-xs mt-0.5 leading-relaxed">{scanError}</p>
+            </div>
           </div>
-          <p className="text-sm">{scanError}</p>
+          <button
+            type="button"
+            onClick={() => useScanStore.getState().failScan('')}
+            className="text-text-muted hover:text-text-main p-1 transition-colors"
+            title="Dismiss notification"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -550,11 +769,22 @@ export function PlagiarismAnalysis() {
 
           <ComparisonsTable
             comparisons={comparisons}
-            deepScanLoading={deepScanLoading}
+            activeDeepScans={activeDeepScans}
+            deepScanResultsCache={deepScanResultsCache}
             onDeepScan={runDeepScan}
+            onViewDeepScanResult={(res) => setDeepScanResult(res)}
           />
         </>
       )}
+
+      {/* Scan History Modal */}
+      <ScanHistoryModal
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        onSelectReport={(report) => {
+          setSelectedProject(report.project_name || report.id || "");
+        }}
+      />
 
       {/* Deep AI Scan Result Modal */}
       <DeepScanPanel

@@ -169,3 +169,156 @@ async def check_projects(names: str):
     loop = asyncio.get_running_loop()
     existing = await loop.run_in_executor(None, lambda: db.check_project_exists(name_list))
     return existing
+
+
+
+class SemanticSearchRequest(BaseModel):
+    query: str
+    threshold: Optional[float] = 0.15
+    top_k: Optional[int] = 20
+    department: Optional[str] = None
+    year: Optional[int] = None
+    university: Optional[str] = None
+
+
+@router.post("/api/plagiarism/projects/semantic-search", dependencies=[Depends(require_role())])
+async def semantic_project_search(payload: SemanticSearchRequest):
+    """
+    AI Semantic Proposal / Abstract Search (Spec Step 2.A).
+    Accepts student project titles, problem statements, or proposed abstracts in English or Arabic,
+    generates 1024-dim dense embeddings via BAAI/bge-m3, and matches them against project documentation
+    and abstracts in pgvector. Returns ranked project records with cosine similarity percentages.
+    """
+    query = (payload.query or "").strip()
+    if not query:
+        return {
+            "query": "",
+            "model_used": "bge-m3",
+            "total_found": 0,
+            "projects": [],
+        }
+
+    db = get_db()
+    loop = asyncio.get_running_loop()
+
+    def _search():
+        import numpy as np
+        from plagiarism_engine.vector_store import model_pool, DOMAIN_MODEL_KEYS
+        from plagiarism_engine.vectors.pgvector_store import PgVectorStore, _calibrate
+
+        model, model_name = model_pool.get_model_with_name(DOMAIN_MODEL_KEYS["text"])
+        if model is None:
+            raise HTTPException(status_code=500, detail="Semantic search model is currently loading.")
+
+        raw_q_emb = model.encode(query, convert_to_numpy=True)
+        q_emb = PgVectorStore._normalize_and_pad_1d(raw_q_emb, 1024)
+
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            sql = """
+                SELECT pf.project_id, pf.relative_path, pf.embedding, pf.embedding_model,
+                       p.name, p.title, p.abstract, p.department, p.year, p.university, p.status
+                FROM project_files pf
+                JOIN projects p ON p.id = pf.project_id
+                WHERE pf.file_type = 'text' AND pf.embedding IS NOT NULL
+            """
+            params = []
+            if payload.department:
+                sql += " AND LOWER(p.department) = LOWER(%s)"
+                params.append(payload.department)
+            if payload.year:
+                sql += " AND p.year = %s"
+                params.append(payload.year)
+            if payload.university:
+                sql += " AND LOWER(p.university) LIKE LOWER(%s)"
+                params.append(f"%{payload.university}%")
+
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+
+            project_hits = {}
+            for r in rows:
+                pid = r[0]
+                rel_path = r[1]
+                emb_raw = r[2]
+                emb_model = r[3]
+                name = r[4]
+                title = r[5] or name
+                abstract = r[6]
+                dept = r[7]
+                yr = r[8]
+                uni = r[9]
+                status = r[10] or "approved"
+
+                emb = PgVectorStore._parse_embedding(emb_raw)
+                if emb is None:
+                    continue
+
+                sim = float(np.dot(q_emb, emb))
+                calibrated_sim = _calibrate(sim, emb_model)
+
+                if pid not in project_hits or calibrated_sim > project_hits[pid]["similarity"]:
+                    project_hits[pid] = {
+                        "project_id": pid,
+                        "name": name,
+                        "title": title,
+                        "abstract": abstract,
+                        "department": dept,
+                        "year": yr,
+                        "university": uni,
+                        "status": status,
+                        "similarity": round(calibrated_sim, 4),
+                        "similarity_raw": round(sim, 4),
+                        "similarity_percent": round(calibrated_sim * 100, 1),
+                        "top_matching_file": rel_path,
+                        "embedding_model": emb_model or model_name,
+                    }
+
+            # Also check projects with abstracts in the projects table
+            cur.execute(
+                "SELECT id, name, title, abstract, department, year, university, status FROM projects WHERE abstract IS NOT NULL AND TRIM(abstract) != ''"
+            )
+            for r in cur.fetchall():
+                pid = r[0]
+                if pid in project_hits and project_hits[pid]["similarity"] >= 0.70:
+                    continue
+                abs_text = (r[3] or "").strip()
+                if not abs_text:
+                    continue
+                abs_emb = model.encode(abs_text[:2000], convert_to_numpy=True)
+                abs_emb = PgVectorStore._normalize_and_pad_1d(abs_emb, 1024)
+                sim = float(np.dot(q_emb, abs_emb))
+                calibrated_sim = _calibrate(sim, model_name)
+                if pid not in project_hits or calibrated_sim > project_hits[pid]["similarity"]:
+                    project_hits[pid] = {
+                        "project_id": pid,
+                        "name": r[1],
+                        "title": r[2] or r[1],
+                        "abstract": abs_text,
+                        "department": r[4],
+                        "year": r[5],
+                        "university": r[6],
+                        "status": r[7] or "approved",
+                        "similarity": round(calibrated_sim, 4),
+                        "similarity_raw": round(sim, 4),
+                        "similarity_percent": round(calibrated_sim * 100, 1),
+                        "top_matching_file": "project_abstract",
+                        "embedding_model": model_name,
+                    }
+
+            thresh = payload.threshold if payload.threshold is not None else 0.15
+            filtered = [p for p in project_hits.values() if p["similarity"] >= thresh]
+            filtered.sort(key=lambda x: x["similarity"], reverse=True)
+            top_k = payload.top_k or 20
+
+            return {
+                "query": query,
+                "model_used": model_name or "bge-m3",
+                "total_found": len(filtered),
+                "projects": filtered[:top_k],
+            }
+        finally:
+            conn.close()
+
+    return await loop.run_in_executor(None, _search)

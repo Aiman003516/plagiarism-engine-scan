@@ -4,11 +4,21 @@ import type { PlagiarismComparison } from '../../lib/api';
 
 export interface ComparisonsTableProps {
   comparisons: PlagiarismComparison[];
-  deepScanLoading: string | null;
+  deepScanLoading?: string | null;
+  activeDeepScans?: string[];
+  deepScanResultsCache?: Record<string, any>;
   onDeepScan: (cmp: PlagiarismComparison) => void;
+  onViewDeepScanResult?: (res: any) => void;
 }
 
-export function ComparisonsTable({ comparisons, deepScanLoading, onDeepScan }: ComparisonsTableProps) {
+export function ComparisonsTable({
+  comparisons,
+  deepScanLoading,
+  activeDeepScans = [],
+  deepScanResultsCache = {},
+  onDeepScan,
+  onViewDeepScanResult,
+}: ComparisonsTableProps) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'CRITICAL' | 'HIGH' | 'LOW' | 'SAFE'>('ALL');
@@ -175,6 +185,8 @@ export function ComparisonsTable({ comparisons, deepScanLoading, onDeepScan }: C
                 {pagedComparisons.map((cmp, i) => {
                   const scanKey = `${cmp.file1}::${cmp.file2 || cmp.matched_file}`;
                   const isLoadingThis = deepScanLoading === scanKey;
+                  const isScanningThis = isLoadingThis || (activeDeepScans ? activeDeepScans.includes(scanKey) : false);
+                  const cachedResult = deepScanResultsCache ? deepScanResultsCache[scanKey] : undefined;
 
                   return (
                     <tr key={`${cmp.file1}-${cmp.project}-${cmp.file2}-${i}`} className="hover:bg-surface/50 dark:hover:bg-slate-700/40 transition-colors">
@@ -225,7 +237,15 @@ export function ComparisonsTable({ comparisons, deepScanLoading, onDeepScan }: C
                         {renderWhyBadge(cmp)}
                       </td>
                       <td className="p-3 text-right">
-                        {isLoadingThis ? (
+                        {cachedResult ? (
+                          <button
+                            onClick={() => (onViewDeepScanResult ? onViewDeepScanResult(cachedResult) : onDeepScan(cmp))}
+                            className="px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all inline-flex items-center gap-1"
+                            title="View AI verified semantic similarity"
+                          >
+                            ✓ AI Verified ({cachedResult.ai_similarity}%)
+                          </button>
+                        ) : isScanningThis ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-accent/50 text-accent-text">
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             Scanning

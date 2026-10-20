@@ -1,9 +1,20 @@
-import { useState } from "react";
-import { Users, RefreshCw, Search, Trash2, Plus, X, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Users, RefreshCw, Search, Trash2, Plus, X, Loader2, UserPlus, GraduationCap, CheckCircle2 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { teamsApi, TeamData } from "../lib/api";
 import { useTeamsCache } from "../lib/useTeamsCache";
+
+interface SearchStudentResult {
+  id: string;
+  name: string;
+  enrollment_number: string;
+  department?: string | null;
+  college?: string | null;
+  university?: string | null;
+  team_id?: string | null;
+  team_name?: string | null;
+}
 
 export default function Teams() {
   const { t } = useTranslation();
@@ -15,10 +26,18 @@ export default function Teams() {
   const [enrollment, setEnrollment] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Live student search state
+  const [studentQuery, setStudentQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchStudentResult[]>([]);
+  const [searchingStudents, setSearchingStudents] = useState(false);
+
   const openTeam = async (team: TeamData) => {
     try {
       const detail = await teamsApi.getById(team.id);
       setActiveTeam(detail);
+      setStudentQuery("");
+      setSearchResults([]);
+      setEnrollment("");
     } catch (e: any) {
       toast.error(e?.message || "Failed to load team");
     }
@@ -43,14 +62,39 @@ export default function Teams() {
     }
   };
 
-  const addMember = async () => {
-    if (!activeTeam || !enrollment.trim()) return;
+  // Debounced live student search
+  useEffect(() => {
+    if (!activeTeam || !studentQuery.trim() || studentQuery.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setSearchingStudents(true);
+      try {
+        const res = await teamsApi.searchStudents(studentQuery.trim());
+        setSearchResults(res.students || []);
+      } catch (e) {
+        console.error("Student search error", e);
+      } finally {
+        setSearchingStudents(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [studentQuery, activeTeam]);
+
+  const addMemberByEnrollment = async (enrollNumber: string) => {
+    if (!activeTeam || !enrollNumber.trim()) return;
     setSaving(true);
     try {
-      await teamsApi.addMember(activeTeam.id, enrollment.trim());
+      await teamsApi.addMember(activeTeam.id, enrollNumber.trim());
       toast.success(t("add_member"));
       setEnrollment("");
+      setStudentQuery("");
+      setSearchResults([]);
       openTeam(activeTeam);
+      load();
     } catch (e: any) {
       toast.error(e?.message || "Failed to add member");
     } finally {
@@ -64,6 +108,7 @@ export default function Teams() {
       await teamsApi.removeMember(activeTeam.id, studentId);
       toast.success(t("delete_success"));
       openTeam(activeTeam);
+      load();
     } catch (e: any) {
       toast.error(e?.message || "Failed to remove member");
     }
@@ -159,8 +204,9 @@ export default function Teams() {
           ))}
         </div>
       )}
+
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
           <div className="glass-panel w-full max-w-md p-6 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800">
             <h2 className="text-lg font-semibold text-text-main mb-4">{t("add_team")}</h2>
             <label className="block text-sm font-medium text-text-main mb-1.5">
@@ -188,45 +234,132 @@ export default function Teams() {
         </div>
       )}
 
+      {/* Team Detail & Member Ingestion Modal */}
       {activeTeam && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="glass-panel w-full max-w-xl max-h-[80vh] flex flex-col rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="glass-panel w-full max-w-2xl max-h-[85vh] flex flex-col rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between p-5 border-b border-border">
-              <h2 className="text-lg font-semibold text-text-main">{activeTeam.name}</h2>
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-teal-500" />
+                <h2 className="text-lg font-bold text-text-main">{activeTeam.name}</h2>
+              </div>
               <button
                 onClick={() => setActiveTeam(null)}
-                className="p-1.5 rounded-lg text-text-muted hover:bg-text-muted/10"
+                className="p-1.5 rounded-lg text-text-muted hover:bg-surface"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-5 space-y-4 overflow-y-auto flex-1">
-              <div className="flex gap-2">
-                <input
-                  value={enrollment}
-                  onChange={(e) => setEnrollment(e.target.value)}
-                  className="input-field flex-1"
-                  placeholder={t("enrollment_number")}
-                />
-                <button onClick={addMember} disabled={saving} className="btn-primary flex-shrink-0">
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} {t("add_member")}
-                </button>
+
+            <div className="p-5 space-y-5 overflow-y-auto flex-1">
+              {/* Interactive Student Search & Quick Add */}
+              <div className="p-4 rounded-xl bg-surface/50 border border-border/60">
+                <label className="block text-xs font-semibold text-text-muted uppercase mb-2">
+                  Search & Add Student to Team
+                </label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+                  <input
+                    value={studentQuery}
+                    onChange={(e) => setStudentQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && studentQuery.trim()) {
+                        addMemberByEnrollment(studentQuery.trim());
+                      }
+                    }}
+                    className="input-field w-full pl-9 pr-24 text-sm"
+                    placeholder="Search by student name or enrollment number..."
+                  />
+                  {searchingStudents && (
+                    <RefreshCw className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted animate-spin" />
+                  )}
+                </div>
+
+                {/* Live Autocomplete Results */}
+                {searchResults.length > 0 && (
+                  <div className="mt-2 max-h-48 overflow-y-auto rounded-xl border border-border bg-card shadow-lg divide-y divide-border/50">
+                    {searchResults.map((stu) => {
+                      const isAlreadyInThisTeam = activeTeam.members?.some(
+                        (m) => m.enrollment_number === stu.enrollment_number
+                      );
+                      const isAssignedOtherTeam = !!stu.team_id && stu.team_id !== activeTeam.id;
+
+                      return (
+                        <div
+                          key={stu.id}
+                          className="p-2.5 flex items-center justify-between hover:bg-surface/60 transition-colors"
+                        >
+                          <div className="min-w-0 pr-2">
+                            <div className="font-medium text-sm text-text-main truncate flex items-center gap-1.5">
+                              <GraduationCap className="w-3.5 h-3.5 text-primary shrink-0" />
+                              {stu.name}
+                            </div>
+                            <div className="text-xs text-text-muted font-mono flex items-center gap-2 mt-0.5">
+                              <span className="text-primary">{stu.enrollment_number}</span>
+                              {stu.department && <span>• {stu.department}</span>}
+                              {stu.college && <span>• {stu.college}</span>}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {isAlreadyInThisTeam ? (
+                              <span className="text-[11px] font-semibold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">
+                                Current Member
+                              </span>
+                            ) : isAssignedOtherTeam ? (
+                              <span className="text-[11px] text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded">
+                                In {stu.team_name || "Another Team"}
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => addMemberByEnrollment(stu.enrollment_number)}
+                                disabled={saving}
+                                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-primary text-primary-text hover:opacity-90 transition-all flex items-center gap-1"
+                              >
+                                <UserPlus className="w-3 h-3" /> Add
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {studentQuery.trim().length >= 2 && !searchingStudents && searchResults.length === 0 && (
+                  <p className="text-xs text-text-muted mt-2 px-1">
+                    No students found matching "{studentQuery}". You can also enter an enrollment ID directly.
+                  </p>
+                )}
               </div>
 
+              {/* Current Team Members List */}
               <div>
-                <h3 className="text-sm font-medium text-text-main mb-2">{t("members")}</h3>
+                <h3 className="text-sm font-semibold text-text-main mb-2.5 flex items-center justify-between">
+                  <span>Current Team Members</span>
+                  <span className="text-xs font-medium text-text-muted">
+                    {activeTeam.members?.length ?? 0} Members
+                  </span>
+                </h3>
+
                 {!activeTeam.members || activeTeam.members.length === 0 ? (
-                  <p className="text-text-muted text-sm text-center py-6">{t("no_members")}</p>
+                  <div className="p-8 text-center text-text-muted bg-surface/30 rounded-xl border border-border/40">
+                    <Users className="w-8 h-8 mx-auto mb-2 opacity-40 text-teal-500" />
+                    <p className="text-sm font-medium">No members added yet</p>
+                    <p className="text-xs mt-1">Use the search box above to add students by name or enrollment ID.</p>
+                  </div>
                 ) : (
                   <ul className="space-y-2">
                     {activeTeam.members.map((m) => (
                       <li
                         key={m.id}
-                        className="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface/50 border border-border/50"
+                        className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-surface/50 border border-border/60 hover:bg-surface/80 transition-colors"
                       >
+                        <div className="w-8 h-8 rounded-lg bg-teal-500/10 text-teal-500 flex items-center justify-center font-bold text-xs shrink-0">
+                          {m.name.charAt(0).toUpperCase()}
+                        </div>
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-text-main text-sm truncate">{m.name}</div>
-                          <div className="text-xs text-text-muted">{m.enrollment_number}</div>
+                          <div className="text-xs text-text-muted font-mono">{m.enrollment_number}</div>
                         </div>
                         <button
                           onClick={() => removeMember(m.id)}
@@ -247,4 +380,3 @@ export default function Teams() {
     </div>
   );
 }
-

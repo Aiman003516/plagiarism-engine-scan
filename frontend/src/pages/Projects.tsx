@@ -7,18 +7,34 @@ import {
   Trash2,
   FileText,
   X,
+  Sparkles,
+  SlidersHorizontal,
+  GraduationCap,
+  Building2,
+  Calendar,
+  AlertTriangle,
+  ArrowRight,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
-import { plagiarismApi, ProjectSummary, ProjectFile } from "../lib/api";
+import {
+  plagiarismApi,
+  ProjectSummary,
+  ProjectFile,
+  SemanticSearchResult,
+} from "../lib/api";
 import { useProjectsCache } from "../lib/useProjectsCache";
 
 export default function Projects() {
   const { t } = useTranslation();
   const { projects, loading, error, refresh: load } = useProjectsCache();
+  const [activeTab, setActiveTab] = useState<"repository" | "semantic">("repository");
+
+  // Repository state
   const [search, setSearch] = useState("");
   const [filesProject, setFilesProject] = useState<{
-    project: ProjectSummary;
+    project: ProjectSummary | { id: string; title: string; name: string };
     files: ProjectFile[];
   } | null>(null);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -26,8 +42,16 @@ export default function Projects() {
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const PAGE_SIZE = 20;
 
-  // Cached login profile (written by Login.tsx as "user_data"). Drives both the
-  // student visibility filter and the faculty "Approve" action below.
+  // Semantic Search state
+  const [semanticQuery, setSemanticQuery] = useState("");
+  const [semanticThreshold, setSemanticThreshold] = useState(0.15);
+  const [semanticDept, setSemanticDept] = useState("");
+  const [semanticUni, setSemanticUni] = useState("");
+  const [searchingSemantic, setSearchingSemantic] = useState(false);
+  const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[]>([]);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [modelUsed, setModelUsed] = useState("bge-m3");
+
   const user = useMemo<{ id?: string; role?: string } | null>(() => {
     const userStr = localStorage.getItem("user_data") || localStorage.getItem("user");
     if (!userStr) return null;
@@ -39,7 +63,7 @@ export default function Projects() {
   }, []);
   const isStudent = user?.role === "student";
 
-  const viewFiles = async (project: ProjectSummary) => {
+  const viewFiles = async (project: ProjectSummary | { id: string; title: string; name: string }) => {
     setLoadingFiles(true);
     try {
       const res = await plagiarismApi.getProjectFiles(project.id);
@@ -75,8 +99,37 @@ export default function Projects() {
     }
   };
 
+  const handleRunSemanticSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!semanticQuery.trim()) {
+      toast.error("Please enter a proposed topic, problem statement, or abstract");
+      return;
+    }
+
+    setSearchingSemantic(true);
+    try {
+      const res = await plagiarismApi.semanticSearch({
+        query: semanticQuery.trim(),
+        threshold: semanticThreshold,
+        top_k: 25,
+        department: semanticDept.trim() || undefined,
+        university: semanticUni.trim() || undefined,
+      });
+
+      setSemanticResults(res.projects || []);
+      setModelUsed(res.model_used || "bge-m3");
+      setHasSearched(true);
+      if ((res.projects || []).length === 0) {
+        toast("No high-similarity projects found for this proposal", { icon: "✅" });
+      }
+    } catch (e: any) {
+      toast.error(e?.message || "Semantic proposal search failed");
+    } finally {
+      setSearchingSemantic(false);
+    }
+  };
+
   const filtered = projects.filter((p: ProjectSummary) => {
-    // Students only ever see their own submissions; staff/admins see everything.
     if (isStudent && p.student_id !== user?.id) return false;
 
     return (
@@ -99,143 +152,391 @@ export default function Projects() {
           </h1>
           <p className="text-text-muted mt-1">{t("projects_subtitle")}</p>
         </div>
-        <div className="relative w-full sm:w-72">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="input-field w-full pl-9"
-            placeholder={t("search_projects")}
-          />
+
+        {/* Top View Mode Navigation Tabs */}
+        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-surface/70 border border-border/80">
+          <button
+            onClick={() => setActiveTab("repository")}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              activeTab === "repository"
+                ? "bg-primary text-primary-text shadow-sm"
+                : "text-text-muted hover:text-text-main hover:bg-surface"
+            }`}
+          >
+            <FolderOpen className="w-3.5 h-3.5" /> Project Repository
+          </button>
+          <button
+            onClick={() => setActiveTab("semantic")}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              activeTab === "semantic"
+                ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm"
+                : "text-text-muted hover:text-text-main hover:bg-surface"
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" /> AI Semantic Proposal Search
+          </button>
         </div>
       </header>
 
-      {loading && projects.length === 0 ? (
-        <div className="flex items-center justify-center min-h-[40vh] text-text-muted">
-          <RefreshCw className="w-6 h-6 animate-spin text-accent" />
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="glass-panel p-10 text-center text-text-muted rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-          <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-500">
-            <FolderOpen className="w-6 h-6" />
-          </span>
-          {t("no_projects_found")}
-        </div>
-      ) : (
-        <div className="glass-panel overflow-hidden rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur">
-                <tr className="text-left text-text-muted border-b border-border">
-                  <th className="py-3 px-4 font-medium">{t("project")}</th>
-                  <th className="py-3 px-4 font-medium">{t("university")}</th>
-                  <th className="py-3 px-4 font-medium">{t("department")}</th>
-                  <th className="py-3 px-4 font-medium">{t("year")}</th>
-                  <th className="py-3 px-4 font-medium">{t("status")}</th>
-                  <th className="py-3 px-4 font-medium text-right">{t("actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paged.map((p: ProjectSummary) => (
-                  <tr key={p.id} className="hover:bg-surface/50 transition-colors border-b border-border/40 last:border-0">
-                    <td className="py-3 px-4">
-                      <div className="flex items-start gap-3">
-                        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
-                          <FolderOpen className="w-4 h-4" />
-                        </span>
-                        <div className="min-w-0">
-                          <div className="font-medium text-text-main truncate">{p.title || p.name}</div>
-                          {p.abstract && (
-                            <div className="text-xs text-text-muted truncate max-w-[280px]">
-                              {p.abstract}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-text-muted">{p.university || "—"}</td>
-                    <td className="py-3 px-4 text-text-muted">{p.department || "—"}</td>
-                    <td className="py-3 px-4 text-text-muted">{p.year ?? "—"}</td>
-                    <td className="py-3 px-4">
-                      <span
-                        className={
-                          p.status === "pending"
-                            ? "inline-flex items-center rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-500 ring-1 ring-amber-500/20"
-                            : "inline-flex items-center rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-500 ring-1 ring-emerald-500/20"
-                        }
-                      >
-                        {p.status?.toUpperCase() || "APPROVED"}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex items-center justify-end gap-2">
-                        {p.status === "pending" && !isStudent && (
-                          <button
-                            onClick={() => approveProject(p)}
-                            disabled={approvingId === p.id}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-500 text-white shadow-sm hover:bg-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            title={t("approve")}
-                          >
-                            {approvingId === p.id ? (
-                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                            )}
-                            {t("approve")}
-                          </button>
-                        )}
-                        <button
-                          onClick={() => viewFiles(p)}
-                          className="p-1.5 rounded-lg text-text-muted hover:bg-text-muted/10 hover:text-text-main transition-colors"
-                          title={t("view_files")}
-                        >
-                          <FileText className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => deleteProject(p)}
-                          className="btn-danger-icon"
-                          title={t("delete")}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* ========================================================================= */}
+      {/* TAB 1: PROJECT REPOSITORY                                                  */}
+      {/* ========================================================================= */}
+      {activeTab === "repository" && (
+        <>
+          <div className="mb-4 flex justify-end">
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="input-field w-full pl-9"
+                placeholder={t("search_projects")}
+              />
+            </div>
           </div>
-          {filtered.length > PAGE_SIZE && (
-            <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-              <span className="text-xs text-text-muted">
-                {t("showing_page")} {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} {t("of_pages")} {filtered.length}
+
+          {loading && projects.length === 0 ? (
+            <div className="flex items-center justify-center min-h-[40vh] text-text-muted">
+              <RefreshCw className="w-6 h-6 animate-spin text-accent" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="glass-panel p-10 text-center text-text-muted rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+              <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-500">
+                <FolderOpen className="w-6 h-6" />
               </span>
-              <div className="flex items-center gap-2">
+              {t("no_projects_found")}
+            </div>
+          ) : (
+            <div className="glass-panel overflow-hidden rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur">
+                    <tr className="text-left text-text-muted border-b border-border">
+                      <th className="py-3 px-4 font-medium">{t("project")}</th>
+                      <th className="py-3 px-4 font-medium">{t("university")}</th>
+                      <th className="py-3 px-4 font-medium">{t("department")}</th>
+                      <th className="py-3 px-4 font-medium">{t("year")}</th>
+                      <th className="py-3 px-4 font-medium">{t("status")}</th>
+                      <th className="py-3 px-4 font-medium text-right">{t("actions")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paged.map((p: ProjectSummary) => (
+                      <tr key={p.id} className="hover:bg-surface/50 transition-colors border-b border-border/40 last:border-0">
+                        <td className="py-3 px-4">
+                          <div className="flex items-start gap-3">
+                            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
+                              <FolderOpen className="w-4 h-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <div className="font-medium text-text-main truncate">{p.title || p.name}</div>
+                              {p.abstract && (
+                                <div className="text-xs text-text-muted truncate max-w-[280px]">
+                                  {p.abstract}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-text-muted">{p.university || "—"}</td>
+                        <td className="py-3 px-4 text-text-muted">{p.department || "—"}</td>
+                        <td className="py-3 px-4 text-text-muted">{p.year ?? "—"}</td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={
+                              p.status === "pending"
+                                ? "inline-flex items-center rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-500 ring-1 ring-amber-500/20"
+                                : "inline-flex items-center rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-500 ring-1 ring-emerald-500/20"
+                            }
+                          >
+                            {p.status?.toUpperCase() || "APPROVED"}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center justify-end gap-2">
+                            {p.status === "pending" && !isStudent && (
+                              <button
+                                onClick={() => approveProject(p)}
+                                disabled={approvingId === p.id}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-500 text-white shadow-sm hover:bg-emerald-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title={t("approve")}
+                              >
+                                {approvingId === p.id ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                )}
+                                {t("approve")}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => viewFiles(p)}
+                              className="p-1.5 rounded-lg text-text-muted hover:bg-text-muted/10 hover:text-text-main transition-colors"
+                              title={t("view_files")}
+                            >
+                              <FileText className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => deleteProject(p)}
+                              className="btn-danger-icon"
+                              title={t("delete")}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {filtered.length > PAGE_SIZE && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+                  <span className="text-xs text-text-muted">
+                    {t("showing_page")} {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} {t("of_pages")} {filtered.length}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={page <= 1}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      className="px-2.5 py-1 rounded-lg text-xs text-text-muted border border-border hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {t("prev_page")}
+                    </button>
+                    <span className="text-xs text-text-muted">{page} / {totalPages}</span>
+                    <button
+                      disabled={page >= totalPages}
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                      className="px-2.5 py-1 rounded-lg text-xs text-text-muted border border-border hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {t("next_page")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 2: AI SEMANTIC PROPOSAL SEARCH (SPEC STEP 2.A)                        */}
+      {/* ========================================================================= */}
+      {activeTab === "semantic" && (
+        <div className="space-y-6">
+          {/* Proposal Input & Filter Card */}
+          <div className="glass-panel p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 space-y-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-text-main flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-purple-500" />
+                  AI Semantic Proposal & Abstract Search
+                </h2>
+                <p className="text-xs text-text-muted mt-1 max-w-2xl leading-relaxed">
+                  Enter your proposed project topic, problem statement, or abstract in <strong>English or Arabic</strong>.
+                  Our dense neural semantic model (BAAI/bge-m3) performs multilingual vector similarity matching across all indexed projects in the database.
+                </p>
+              </div>
+              <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-purple-500/10 text-purple-500 border border-purple-500/20 flex-shrink-0">
+                Model: {modelUsed} (1024-d)
+              </span>
+            </div>
+
+            <form onSubmit={handleRunSemanticSearch} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-text-muted uppercase mb-1.5">
+                  Proposed Topic / Problem Statement / Abstract
+                </label>
+                <textarea
+                  value={semanticQuery}
+                  onChange={(e) => setSemanticQuery(e.target.value)}
+                  rows={4}
+                  className="input-field w-full font-sans text-sm resize-y leading-relaxed"
+                  placeholder="e.g. Design and implementation of an autonomous robotics navigation system utilizing LIDAR and computer vision for obstacle avoidance in warehouse environments... (or Arabic: نظام التحكم الذكي للروبوتات المتنقلة)"
+                />
+              </div>
+
+              {/* Optional Filters & Threshold */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                <div>
+                  <label className="block text-xs font-semibold text-text-muted uppercase mb-1">
+                    Department (Optional)
+                  </label>
+                  <input
+                    value={semanticDept}
+                    onChange={(e) => setSemanticDept(e.target.value)}
+                    className="input-field w-full text-xs"
+                    placeholder="e.g. Computer Science"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-text-muted uppercase mb-1">
+                    University (Optional)
+                  </label>
+                  <input
+                    value={semanticUni}
+                    onChange={(e) => setSemanticUni(e.target.value)}
+                    className="input-field w-full text-xs"
+                    placeholder="e.g. Baghdad University"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-text-muted uppercase">
+                      Min Similarity Threshold
+                    </label>
+                    <span className="text-xs font-bold text-primary font-mono">
+                      {Math.round(semanticThreshold * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.10"
+                    max="0.80"
+                    step="0.05"
+                    value={semanticThreshold}
+                    onChange={(e) => setSemanticThreshold(parseFloat(e.target.value))}
+                    className="w-full accent-primary cursor-pointer mt-1.5"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2">
                 <button
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="px-2.5 py-1 rounded-lg text-xs text-text-muted border border-border hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
+                  type="submit"
+                  disabled={searchingSemantic || !semanticQuery.trim()}
+                  className="px-5 py-2.5 rounded-xl font-semibold text-sm bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md hover:from-purple-500 hover:to-indigo-500 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {t("prev_page")}
-                </button>
-                <span className="text-xs text-text-muted">{page} / {totalPages}</span>
-                <button
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  className="px-2.5 py-1 rounded-lg text-xs text-text-muted border border-border hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {t("next_page")}
+                  {searchingSemantic ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Analyzing Semantic Vector Embeddings...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 text-amber-300" />
+                      Search Existing Projects
+                    </>
+                  )}
                 </button>
               </div>
+            </form>
+          </div>
+
+          {/* Results Area */}
+          {hasSearched && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-text-main flex items-center gap-2">
+                  <span>Semantic Match Results</span>
+                  <span className="px-2 py-0.5 rounded-md text-xs bg-surface border border-border text-text-muted">
+                    {semanticResults.length} matching project(s)
+                  </span>
+                </h3>
+              </div>
+
+              {semanticResults.length === 0 ? (
+                <div className="glass-panel p-10 text-center rounded-2xl border border-slate-200 dark:border-slate-800">
+                  <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-500 mb-2" />
+                  <h4 className="font-bold text-text-main text-base">High Originality Detected</h4>
+                  <p className="text-sm text-text-muted mt-1 max-w-md mx-auto">
+                    No existing projects in the database match your proposed topic above the {Math.round(semanticThreshold * 100)}% similarity threshold. This proposal appears to be novel!
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4">
+                  {semanticResults.map((item) => {
+                    const pct = item.similarity_percent;
+                    const badgeColor =
+                      pct >= 75
+                        ? "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                        : pct >= 50
+                        ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                        : "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30";
+
+                    return (
+                      <div
+                        key={item.project_id}
+                        className="glass-card rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow space-y-3"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/50 pb-3">
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-base text-text-main truncate">
+                              {item.title || item.name}
+                            </h4>
+                            <div className="flex items-center gap-3 text-xs text-text-muted mt-1 flex-wrap">
+                              {item.university && (
+                                <span className="flex items-center gap-1">
+                                  <Building2 className="w-3.5 h-3.5 text-text-muted" />
+                                  {item.university}
+                                </span>
+                              )}
+                              {item.department && (
+                                <span className="flex items-center gap-1">
+                                  <GraduationCap className="w-3.5 h-3.5 text-text-muted" />
+                                  {item.department}
+                                </span>
+                              )}
+                              {item.year && (
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="w-3.5 h-3.5 text-text-muted" />
+                                  {item.year}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3 flex-shrink-0">
+                            <div className={`px-3 py-1 rounded-xl text-xs font-bold border ${badgeColor} flex items-center gap-1.5`}>
+                              {pct >= 75 ? (
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                              ) : (
+                                <Sparkles className="w-3.5 h-3.5" />
+                              )}
+                              {pct}% Match
+                            </div>
+                            <button
+                              onClick={() => viewFiles({ id: item.project_id, title: item.title, name: item.name })}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface hover:bg-surface/80 border border-border transition-colors flex items-center gap-1 text-text-main"
+                            >
+                              <FileText className="w-3.5 h-3.5" /> View Files
+                            </button>
+                          </div>
+                        </div>
+
+                        {item.abstract && (
+                          <div className="text-xs text-text-muted leading-relaxed line-clamp-3 bg-surface/30 p-3 rounded-xl border border-border/30">
+                            <span className="font-semibold text-text-main">Abstract: </span>
+                            {item.abstract}
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between text-[11px] text-text-muted pt-1">
+                          <span className="font-mono truncate max-w-md">
+                            Matched file: <strong className="text-primary font-medium">{item.top_matching_file}</strong>
+                          </span>
+                          <span className="font-mono">
+                            Cosine Sim: {item.similarity_raw.toFixed(3)} (Calibrated: {(item.similarity * 100).toFixed(1)}%)
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
+
+      {/* View Project Files Modal */}
       {filesProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
           <div className="glass-panel w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between p-5 border-b border-border">
-              <h2 className="text-lg font-semibold text-text-main">
+              <h2 className="text-lg font-semibold text-text-main truncate pr-2">
                 {filesProject.project.title || filesProject.project.name} — {t("view_files")}
               </h2>
               <button

@@ -20,10 +20,26 @@ router = APIRouter(tags=["users"])
 
 class UserCreate(BaseModel):
     name: str
-    email: str
-    password: str
+    email: Optional[str] = None
+    enrollment_number: Optional[str] = None
+    password: Optional[str] = None
     role: str
     college_id: Optional[str] = None
+    department: Optional[str] = None
+    university: Optional[str] = None
+
+
+class StudentBulkImportItem(BaseModel):
+    name: str
+    enrollment_number: str
+    college_id: Optional[str] = None
+    department: Optional[str] = None
+    university: Optional[str] = None
+    password: Optional[str] = None
+
+
+class StudentBulkImportPayload(BaseModel):
+    students: List[StudentBulkImportItem]
 
 
 class UserUpdate(BaseModel):
@@ -65,17 +81,26 @@ async def create_user_endpoint(
 ):
     db = get_db()
     loop = asyncio.get_running_loop()
-    email = payload.email.strip().lower()
     name = payload.name.strip()
-
-    if not email:
-        raise HTTPException(status_code=400, detail="Email is required")
-    if not payload.password:
-        raise HTTPException(status_code=400, detail="Password is required")
 
     valid_roles = {"ministry_admin", "college_admin", "faculty", "student"}
     if payload.role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(sorted(valid_roles))}")
+
+    # Determine identifier (email or enrollment number for student)
+    if payload.role == "student":
+        enum = (payload.enrollment_number or "").strip()
+        if not enum:
+            raise HTTPException(status_code=400, detail="Enrollment number is required for students.")
+        email = (payload.email or f"{enum}@student.system").strip().lower()
+        password = payload.password or "123456"
+    else:
+        email = (payload.email or "").strip().lower()
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required.")
+        if not payload.password:
+            raise HTTPException(status_code=400, detail="Password is required.")
+        password = payload.password
 
     user_id = str(uuid.uuid4())
 
@@ -92,17 +117,76 @@ async def create_user_endpoint(
         if db.get_user_by_email(email):
             return "EMAIL_REGISTERED", None
 
-        password_hash = bcrypt.hashpw(payload.password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-        db.create_user(user_id, name, email, password_hash, payload.role, payload.college_id)
-        return "OK", db.get_user_by_id(user_id)
+        password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+        if payload.role == "student":
+            senum = (payload.enrollment_number or "").strip()
+            if db.get_student_by_enrollment_number(senum):
+                return "STUDENT_REGISTERED", None
+            # Insert into students table for team management
+            db.create_student(
+                id=user_id,
+                enrollment_number=senum,
+                name=name,
+                password_hash=password_hash,
+                requires_password_change=True,
+            )
+            # Also sync into users table so student can authenticate
+            db.create_user(user_id, name, senum, password_hash, "student", payload.college_id)
+            return "OK", db.get_user_by_id(user_id)
+        else:
+            db.create_user(user_id, name, email, password_hash, payload.role, payload.college_id)
+            return "OK", db.get_user_by_id(user_id)
 
     status, user = await loop.run_in_executor(None, _precheck_and_create)
     if status == "ADMIN_SELF_LOCK":
         raise HTTPException(status_code=403, detail="Admins cannot modify their own roles.")
     if status == "EMAIL_REGISTERED":
         raise HTTPException(status_code=400, detail="Email already registered")
+    if status == "STUDENT_REGISTERED":
+        raise HTTPException(status_code=400, detail="Student with this enrollment number already exists")
 
     return _serialize_user(user)
+
+
+@router.post("/api/users/bulk-import-students", dependencies=[Depends(require_role("ministry_admin", "college_admin"))])
+async def bulk_import_students(payload: StudentBulkImportPayload):
+    """Batch import students from parsed CSV or Excel payload."""
+    db = get_db()
+    loop = asyncio.get_running_loop()
+
+    def _batch_import():
+        imported = 0
+        skipped = 0
+        errors = []
+        for s in payload.students:
+            enum = s.enrollment_number.strip()
+            name = s.name.strip()
+            if not enum or not name:
+                errors.append(f"Row skipped: missing name or enrollment number")
+                continue
+            if db.get_student_by_enrollment_number(enum):
+                skipped += 1
+                continue
+            pwd = s.password or "123456"
+            pwd_hash = bcrypt.hashpw(pwd.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+            uid = str(uuid.uuid4())
+            try:
+                db.create_student(
+                    id=uid,
+                    enrollment_number=enum,
+                    name=name,
+                    password_hash=pwd_hash,
+                    requires_password_change=True,
+                )
+                db.create_user(uid, name, enum, pwd_hash, "student", s.college_id)
+                imported += 1
+            except Exception as e:
+                errors.append(f"Error importing {enum}: {str(e)}")
+        return imported, skipped, errors
+
+    imported, skipped, errors = await loop.run_in_executor(None, _batch_import)
+    return {"imported": imported, "skipped": skipped, "errors": errors}
 
 
 @router.get("/api/users/{user_id}", dependencies=[Depends(require_role("ministry_admin", "college_admin"))])

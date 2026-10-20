@@ -150,3 +150,50 @@ async def remove_team_member_endpoint(team_id: str, student_id: str):
     if status == "NOT_MEMBER":
         raise HTTPException(status_code=404, detail="Student is not a member of this team")
     return {"detail": "Student removed from team"}
+
+
+
+@router.get("/api/teams/students/search", dependencies=[Depends(require_role())])
+async def search_students_for_teams(q: str = ""):
+    """Search students by name or enrollment number for team assignment."""
+    db = get_db()
+    loop = asyncio.get_running_loop()
+
+    def _search():
+        conn = db._get_connection()
+        cur = conn.cursor()
+        query = f"%{q.strip().lower()}%"
+        if db.mode == "postgresql":
+            cur.execute(
+                "SELECT s.id, s.enrollment_number, s.name, s.college_id, s.team_id, t.name as team_name "
+                "FROM students s LEFT JOIN teams t ON s.team_id = t.id "
+                "WHERE LOWER(s.name) LIKE %s OR LOWER(s.enrollment_number) LIKE %s "
+                "ORDER BY s.name ASC LIMIT 20;",
+                (query, query),
+            )
+        else:
+            cur.execute(
+                "SELECT s.id, s.enrollment_number, s.name, s.college_id, s.team_id, t.name as team_name "
+                "FROM students s LEFT JOIN teams t ON s.team_id = t.id "
+                "WHERE LOWER(s.name) LIKE ? OR LOWER(s.enrollment_number) LIKE ? "
+                "ORDER BY s.name ASC LIMIT 20;",
+                (query, query),
+            )
+        rows = cur.fetchall()
+        results = []
+        for r in rows:
+            if hasattr(r, "keys"):
+                results.append(dict(r))
+            else:
+                results.append({
+                    "id": r[0],
+                    "enrollment_number": r[1],
+                    "name": r[2],
+                    "college_id": r[3],
+                    "team_id": r[4],
+                    "team_name": r[5] if len(r) > 5 else None,
+                })
+        return results
+
+    students = await loop.run_in_executor(None, _search)
+    return {"students": students}

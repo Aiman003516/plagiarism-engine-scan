@@ -349,6 +349,29 @@ export interface DirectCompareFilesResult {
   total_lines_b: number;
 }
 
+export interface SemanticSearchResult {
+  project_id: string;
+  name: string;
+  title: string;
+  abstract?: string | null;
+  department?: string | null;
+  year?: number | null;
+  university?: string | null;
+  status?: string | null;
+  similarity: number;
+  similarity_raw: number;
+  similarity_percent: number;
+  top_matching_file: string;
+  embedding_model: string;
+}
+
+export interface SemanticSearchResponse {
+  query: string;
+  model_used: string;
+  total_found: number;
+  projects: SemanticSearchResult[];
+}
+
 export const plagiarismApi = {
   getProjects: () =>
     apiFetch<{ projects: ProjectSummary[] }>("/api/plagiarism/projects"),
@@ -374,6 +397,19 @@ export const plagiarismApi = {
 
   checkProjectExists: (names: string[]) =>
     apiFetch<string[]>(`/api/plagiarism/projects/check?names=${encodeURIComponent(names.join(','))}`),
+
+  semanticSearch: (params: {
+    query: string;
+    threshold?: number;
+    top_k?: number;
+    department?: string;
+    year?: number;
+    university?: string;
+  }) =>
+    apiFetch<SemanticSearchResponse>("/api/plagiarism/projects/semantic-search", {
+      method: "POST",
+      body: JSON.stringify(params),
+    }),
 
   runScan: (scanType: string, target?: string) =>
     apiFetch<PlagiarismScanResult>("/api/plagiarism/scan", {
@@ -810,11 +846,24 @@ export const plagiarismApi = {
       body: JSON.stringify(payload),
     }),
 
-  /** Direct pairwise comparison of two uploaded standalone files/documents. */
-  compareDirectFiles: async (fileA: File, fileB: File): Promise<DirectCompareFilesResult> => {
+  /** Direct pairwise comparison of any two files (uploaded or from database projects). */
+  compareDirectFiles: async (
+    fileA?: File | null,
+    fileB?: File | null,
+    dbA?: { projectId: string; filePath: string } | null,
+    dbB?: { projectId: string; filePath: string } | null
+  ): Promise<DirectCompareFilesResult> => {
     const formData = new FormData();
-    formData.append("file_a", fileA, fileA.name);
-    formData.append("file_b", fileB, fileB.name);
+    if (fileA) formData.append("file_a", fileA, fileA.name);
+    if (fileB) formData.append("file_b", fileB, fileB.name);
+    if (dbA) {
+      formData.append("project_a_id", dbA.projectId);
+      formData.append("file_a_path", dbA.filePath);
+    }
+    if (dbB) {
+      formData.append("project_b_id", dbB.projectId);
+      formData.append("file_b_path", dbB.filePath);
+    }
     const token = localStorage.getItem("auth_token");
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -866,10 +915,39 @@ export const usersApi = {
   getById: (id: string) =>
     apiFetch<UserProfileData>(`/api/users/${id}`),
 
-  create: (data: { name: string; email: string; password: string; role: string; college_id?: string }) =>
+  create: (data: {
+    name: string;
+    email: string;
+    password?: string;
+    role: string;
+    college_id?: string;
+    enrollment_number?: string;
+    department?: string;
+    university?: string;
+    college?: string;
+  }) =>
     apiFetch<UserProfileData>("/api/users", {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  bulkImportStudents: (students: Array<{
+    name: string;
+    enrollment_number: string;
+    college?: string;
+    department?: string;
+    university?: string;
+    email?: string;
+    password?: string;
+  }>) =>
+    apiFetch<{
+      imported_count: number;
+      failed_count: number;
+      created: Array<{ id: string; name: string; enrollment_number: string }>;
+      errors: Array<{ enrollment_number: string; error: string }>;
+    }>("/api/users/bulk-import-students", {
+      method: "POST",
+      body: JSON.stringify({ students }),
     }),
 
   update: (
@@ -914,6 +992,20 @@ export const teamsApi = {
   },
 
   getById: (id: string) => apiFetch<TeamData>(`/api/teams/${id}`),
+
+  searchStudents: (query: string) =>
+    apiFetch<{
+      students: Array<{
+        id: string;
+        name: string;
+        enrollment_number: string;
+        department?: string | null;
+        college?: string | null;
+        university?: string | null;
+        team_id?: string | null;
+        team_name?: string | null;
+      }>;
+    }>(`/api/teams/students/search?q=${encodeURIComponent(query)}`),
 
   create: (data: { name: string; college_id?: string }) =>
     apiFetch<TeamData>("/api/teams", {

@@ -223,50 +223,65 @@ async def compare_files_endpoint(req: CompareFilesRequest):
 
 @router.post("/api/plagiarism/compare-direct-files", dependencies=[Depends(require_role())])
 async def compare_direct_files(
-    file_a: UploadFile = File(...),
-    file_b: UploadFile = File(...),
+    file_a: Optional[UploadFile] = File(None),
+    file_b: Optional[UploadFile] = File(None),
+    project_a_id: Optional[str] = Form(None),
+    file_a_path: Optional[str] = Form(None),
+    project_b_id: Optional[str] = Form(None),
+    file_b_path: Optional[str] = Form(None),
 ):
-    """Direct pairwise comparison of any two uploaded documents or code files.
+    """Direct pairwise comparison of any two documents or code files.
 
-    Accepts PDF, Word (.docx), Source Code, or Plain Text files.
+    Files may be provided as uploaded files (PDF, Word docx, Code, Text)
+    OR selected from existing indexed database projects.
     Extracts text, computes hybrid similarity score (fusion/Winnowing),
     and performs line-level diffing for the visual Diff Viewer.
     """
-    if not file_a or not file_b:
-        raise HTTPException(status_code=400, detail="Both 'file_a' and 'file_b' are required.")
-
+    db = get_db()
     extractor = FileExtractor()
 
-    def _extract(upload: UploadFile) -> tuple[str, str]:
-        filename = upload.filename or "unknown"
-        ext = Path(filename).suffix.lower()
-        ftype = file_type_for(filename) or "text"
+    def _resolve_file(upload: Optional[UploadFile], project_id: Optional[str], file_path: Optional[str], default_label: str) -> tuple[str, str, str]:
+        if upload is not None and upload.filename:
+            filename = upload.filename
+            ext = Path(filename).suffix.lower()
+            ftype = file_type_for(filename) or "text"
+            content_bytes = upload.file.read()
+            if not content_bytes:
+                return "", ftype, filename
 
-        content_bytes = upload.file.read()
-        if not content_bytes:
-            return "", ftype
-
-        if ext in (".pdf", ".docx"):
-            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-                tmp.write(content_bytes)
-                tmp_path = tmp.name
-            try:
-                if ext == ".pdf":
-                    text = extractor.extract_text_from_pdf(tmp_path)
-                else:
-                    text = extractor.extract_text_from_docx(tmp_path)
-                return text, "text"
-            finally:
+            if ext in (".pdf", ".docx"):
+                with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                    tmp.write(content_bytes)
+                    tmp_path = tmp.name
                 try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-        else:
-            text = content_bytes.decode("utf-8", errors="replace")
-            return text, ftype
+                    if ext == ".pdf":
+                        text = extractor.extract_text_from_pdf(tmp_path)
+                    else:
+                        text = extractor.extract_text_from_docx(tmp_path)
+                    return text, "text", filename
+                finally:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+            else:
+                text = content_bytes.decode("utf-8", errors="replace")
+                return text, ftype, filename
 
-    content_a, type_a = _extract(file_a)
-    content_b, type_b = _extract(file_b)
+        elif project_id and file_path:
+            db_files = db.get_files_by_paths(project_id, [file_path])
+            if not db_files:
+                raise HTTPException(status_code=404, detail=f"File '{file_path}' not found in project '{project_id}'.")
+            item = db_files[0]
+            content = item.get("content", "")
+            ftype = item.get("file_type") or file_type_for(file_path) or "text"
+            label = f"{project_id} : {file_path}"
+            return content, ftype, label
+
+        raise HTTPException(status_code=400, detail=f"Missing file source for {default_label}: upload a file or select from database.")
+
+    content_a, type_a, name_a = _resolve_file(file_a, project_a_id, file_a_path, "File A")
+    content_b, type_b, name_b = _resolve_file(file_b, project_b_id, file_b_path, "File B")
 
     if not content_a.strip() or not content_b.strip():
         raise HTTPException(status_code=400, detail="One or both files contain no extractable text.")
@@ -279,8 +294,8 @@ async def compare_direct_files(
         file_b_content=content_b,
         file_type=eff_type,
         winnowing_engine=winnow_engine,
-        filename=file_a.filename or "file_a",
-        filename_b=file_b.filename or "file_b",
+        filename=name_a,
+        filename_b=name_b,
     )
 
     lines_a = content_a.splitlines()
@@ -291,8 +306,8 @@ async def compare_direct_files(
     matched_lines = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in opcodes if tag == "equal")
 
     return {
-        "file_a_name": file_a.filename,
-        "file_b_name": file_b.filename,
+        "file_a_name": name_a,
+        "file_b_name": name_b,
         "file_type": eff_type,
         "similarity": fusion_result["fusion_score"],
         "winnowing_score": fusion_result["winnowing_score"],

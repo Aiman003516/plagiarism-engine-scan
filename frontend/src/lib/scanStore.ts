@@ -73,6 +73,13 @@ interface ScanStore {
   abortController: AbortController | null;
   setAbortController: (c: AbortController | null) => void;
 
+  // --- Parallel Deep AI Scan state ---
+  activeDeepScans: string[];
+  addActiveDeepScan: (key: string) => void;
+  removeActiveDeepScan: (key: string) => void;
+  deepScanResultsCache: Record<string, any>;
+  cacheDeepScanResult: (key: string, res: any) => void;
+
   // Group C actions
   /** Store the reconnect capability delivered as the first frame of a scan stream. */
   setStreamSession: (projectId: string, token: string, startedAt?: number) => void;
@@ -145,11 +152,18 @@ export const useScanStore = create<ScanStore>()(persist((set) => ({
     streamLogCount: 0,
   }),
   completeScan: (result, duration) => set((s) => ({
-    isScanning: false, isReconnecting: false, scanResult: result,
+    isScanning: false, isReconnecting: false, scanResult: result, scanError: null,
     scanDuration: duration ?? (s.scanStartedAt ? (Date.now() - s.scanStartedAt) / 1000 : s.scanDuration),
     // Stream finished: drop the capability so we never re-attach to a dead stream.
     streamToken: null,
   })),
+
+  // --- Parallel Deep AI Scan state actions ---
+  activeDeepScans: [],
+  addActiveDeepScan: (key) => set((s) => ({ activeDeepScans: [...s.activeDeepScans.filter((k) => k !== key), key] })),
+  removeActiveDeepScan: (key) => set((s) => ({ activeDeepScans: s.activeDeepScans.filter((k) => k !== key) })),
+  deepScanResultsCache: {},
+  cacheDeepScanResult: (key, res) => set((s) => ({ deepScanResultsCache: { ...s.deepScanResultsCache, [key]: res } })),
   failScan: (error) => set((s) => ({
     isScanning: false, isReconnecting: false, scanError: error,
     scanDuration: s.scanStartedAt ? (Date.now() - s.scanStartedAt) / 1000 : s.scanDuration,
@@ -238,6 +252,7 @@ export const useScanStore = create<ScanStore>()(persist((set) => ({
     streamToken: s.streamToken,
     scanStartedAt: s.scanStartedAt,
     streamLogCount: s.streamLogCount,
+    deepScanResultsCache: s.deepScanResultsCache,
   }),
   // Runs once, synchronously, as the persisted state is read back on page load.
   // The hydrated draft is mutated directly because `useScanStore` is not assigned
