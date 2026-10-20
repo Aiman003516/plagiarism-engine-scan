@@ -9,7 +9,9 @@ import {
   ProjectComparisonMatch,
   PlagiarismComparison,
   PlagiarismScanResult,
+  DirectCompareFilesResult,
 } from '../lib/api';
+import { UploadCloud, FileText, CheckCircle2, Scale } from 'lucide-react';
 import DiffViewer from '../components/DiffViewer';
 import { SummaryCards } from './plagiarism/SummaryCards';
 import { ComparisonsTable } from './plagiarism/ComparisonsTable';
@@ -32,11 +34,20 @@ export function PlagiarismAnalysis() {
   } = useProjectsCache();
 
   // Persistent scanStore: scan execution & live streaming survive navigation and reloads
-  const isScanning = useScanStore((s) => s.isScanning);
+  const scanSource = useScanStore((s) => s.scanSource);
+  const isScanning = useScanStore((s) => s.isScanning && s.scanSource === "scanner");
   const scanResult = useScanStore((s) => s.scanResult);
-  const scanError = useScanStore((s) => s.scanError);
+  const scanError = useScanStore((s) => s.scanSource === "scanner" ? s.scanError : null);
   const activeProjectId = useScanStore((s) => s.activeProjectId);
   const scanDuration = useScanStore((s) => s.scanDuration) ?? 0;
+
+  // Direct Two-File / Document Pair Comparison state
+  const [fileA, setFileA] = useState<File | null>(null);
+  const [fileB, setFileB] = useState<File | null>(null);
+  const [isComparingFiles, setIsComparingFiles] = useState(false);
+  const [directResult, setDirectResult] = useState<DirectCompareFilesResult | null>(null);
+  const [directError, setDirectError] = useState<string | null>(null);
+  const [showDirectDiffModal, setShowDirectDiffModal] = useState(false);
 
   const [selectedProject, setSelectedProject] = useState<string>(() => activeProjectId || '');
   const [deepScanLoading, setDeepScanLoading] = useState<string | null>(null);
@@ -94,6 +105,24 @@ export function PlagiarismAnalysis() {
       toast.error(e?.message || 'Deep scan failed');
     } finally {
       setDeepScanLoading(null);
+    }
+  };
+
+  // Direct pairwise comparison between two standalone uploaded files/documents
+  const runDirectFileComparison = async () => {
+    if (!fileA || !fileB) return;
+    setIsComparingFiles(true);
+    setDirectResult(null);
+    setDirectError(null);
+    try {
+      const res = await plagiarismApi.compareDirectFiles(fileA, fileB);
+      setDirectResult(res);
+      toast.success(`Pairwise comparison complete: ${res.similarity}% similarity`);
+    } catch (e: any) {
+      setDirectError(e?.message || 'File comparison failed');
+      toast.error(e?.message || 'File comparison failed');
+    } finally {
+      setIsComparingFiles(false);
     }
   };
 
@@ -213,6 +242,157 @@ export function PlagiarismAnalysis() {
 
       {/* Real-time Streaming Terminal */}
       <ScanProgress scope="scanner" />
+
+      {/* Direct File & Document Pair Review (Pair-to-Pair Comparison) */}
+      <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-8 shadow-sm">
+        <div className="flex items-center gap-3 mb-2">
+          <Scale className="w-6 h-6 text-primary" />
+          <h2 className="text-xl font-bold text-text-main">Direct Document & File Pair Comparison</h2>
+        </div>
+        <p className="text-text-muted text-sm mb-6">
+          Upload any two files (PDF, Word DOCX, source code, or plain text) for an instant pairwise deep similarity check with score breakdown and side-by-side diff.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          {/* File A Box */}
+          <div className="border-2 border-dashed border-border dark:border-slate-700 rounded-xl p-5 flex flex-col items-center justify-center text-center hover:border-primary/50 transition-colors bg-surface/30">
+            <input
+              type="file"
+              id="direct-file-a"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.[0]) {
+                  setFileA(e.target.files[0]);
+                  setDirectResult(null);
+                  setDirectError(null);
+                }
+              }}
+            />
+            {fileA ? (
+              <div className="flex flex-col items-center gap-2">
+                <FileText className="w-8 h-8 text-primary" />
+                <span className="font-semibold text-text-main text-sm max-w-[240px] truncate" title={fileA.name}>{fileA.name}</span>
+                <span className="text-xs text-text-muted">{(fileA.size / 1024).toFixed(1)} KB</span>
+                <button
+                  type="button"
+                  onClick={() => { setFileA(null); setDirectResult(null); }}
+                  className="mt-2 text-xs text-red-500 hover:underline"
+                >
+                  Remove File A
+                </button>
+              </div>
+            ) : (
+              <label htmlFor="direct-file-a" className="cursor-pointer flex flex-col items-center gap-2">
+                <UploadCloud className="w-8 h-8 text-text-muted" />
+                <span className="text-sm font-medium text-text-main">Select Document / File A</span>
+                <span className="text-xs text-text-muted">PDF, DOCX, Code, or Text</span>
+              </label>
+            )}
+          </div>
+
+          {/* File B Box */}
+          <div className="border-2 border-dashed border-border dark:border-slate-700 rounded-xl p-5 flex flex-col items-center justify-center text-center hover:border-primary/50 transition-colors bg-surface/30">
+            <input
+              type="file"
+              id="direct-file-b"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.[0]) {
+                  setFileB(e.target.files[0]);
+                  setDirectResult(null);
+                  setDirectError(null);
+                }
+              }}
+            />
+            {fileB ? (
+              <div className="flex flex-col items-center gap-2">
+                <FileText className="w-8 h-8 text-emerald-500" />
+                <span className="font-semibold text-text-main text-sm max-w-[240px] truncate" title={fileB.name}>{fileB.name}</span>
+                <span className="text-xs text-text-muted">{(fileB.size / 1024).toFixed(1)} KB</span>
+                <button
+                  type="button"
+                  onClick={() => { setFileB(null); setDirectResult(null); }}
+                  className="mt-2 text-xs text-red-500 hover:underline"
+                >
+                  Remove File B
+                </button>
+              </div>
+            ) : (
+              <label htmlFor="direct-file-b" className="cursor-pointer flex flex-col items-center gap-2">
+                <UploadCloud className="w-8 h-8 text-text-muted" />
+                <span className="text-sm font-medium text-text-main">Select Document / File B</span>
+                <span className="text-xs text-text-muted">PDF, DOCX, Code, or Text</span>
+              </label>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            disabled={!fileA || !fileB || isComparingFiles}
+            onClick={runDirectFileComparison}
+            className="bg-primary hover:bg-primary-hover text-primary-text px-6 py-2.5 rounded-lg font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {isComparingFiles ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Scale className="w-4 h-4" />}
+            {isComparingFiles ? 'Comparing Files...' : 'Compare Two Files'}
+          </button>
+        </div>
+
+        {directError && (
+          <div className="mt-4 bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-red-600 dark:text-red-400 text-sm">
+            {directError}
+          </div>
+        )}
+
+        {directResult && (
+          <div className="mt-6 p-5 rounded-xl border border-border/50 dark:border-slate-700 bg-surface/40">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+              <div>
+                <div className="text-xs text-text-muted mb-1">Pairwise Similarity Score</div>
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl font-extrabold text-text-main">{directResult.similarity}%</span>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                    directResult.verdict === 'CRITICAL' ? 'bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30' :
+                    directResult.verdict === 'HIGH' ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/30' :
+                    directResult.verdict === 'LOW' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30' :
+                    'bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/30'
+                  }`}>
+                    {directResult.verdict}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowDirectDiffModal(true)}
+                className="bg-accent hover:bg-accent-hover text-accent-text px-4 py-2 rounded-lg font-medium text-xs transition-colors flex items-center gap-1.5 shadow-sm"
+              >
+                <Eye className="w-4 h-4" />
+                View Side-by-Side Diff ({directResult.matched_lines} identical lines)
+              </button>
+            </div>
+
+            {/* Score Breakdown Pills */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t border-border/50 dark:border-slate-700/60 text-xs">
+              <div className="p-2.5 rounded-lg bg-background dark:bg-slate-900 border border-border/40">
+                <span className="text-text-muted block text-[11px]">Winnowing (N-gram)</span>
+                <span className="font-semibold text-text-main">{directResult.winnowing_score}%</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-background dark:bg-slate-900 border border-border/40">
+                <span className="text-text-muted block text-[11px]">Semantic (Neural)</span>
+                <span className="font-semibold text-text-main">{directResult.semantic_score}%</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-background dark:bg-slate-900 border border-border/40">
+                <span className="text-text-muted block text-[11px]">Containment Ratio</span>
+                <span className="font-semibold text-text-main">{directResult.containment_score}%</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-background dark:bg-slate-900 border border-border/40">
+                <span className="text-text-muted block text-[11px]">Line Overlap</span>
+                <span className="font-semibold text-text-main">{directResult.match_ratio}%</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Direct Project Comparison */}
       <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-8 shadow-sm">
@@ -381,6 +561,59 @@ export function PlagiarismAnalysis() {
         deepScanResult={deepScanResult}
         onClose={() => setDeepScanResult(null)}
       />
+
+      {/* Direct Two-File Visual Diff Modal */}
+      {showDirectDiffModal && directResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-xl w-full max-w-6xl max-h-[90vh] flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <h3 className="text-lg font-bold flex items-center gap-2 text-text-main">
+                <Eye className="w-5 h-5 text-primary" />
+                Pairwise Diff: {directResult.file_a_name} vs {directResult.file_b_name}
+              </h3>
+              <button
+                onClick={() => setShowDirectDiffModal(false)}
+                className="p-1.5 rounded-lg text-text-muted hover:bg-surface/50 transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto">
+              <DiffViewer
+                projectA={directResult.file_a_name}
+                fileA={directResult.file_a_name}
+                projectB={directResult.file_b_name}
+                fileB={directResult.file_b_name}
+                initialData={{
+                  project_a: "Document A",
+                  file_a: directResult.file_a_name,
+                  project_b: "Document B",
+                  file_b: directResult.file_b_name,
+                  similarity: directResult.similarity,
+                  lines_a: directResult.lines_a,
+                  lines_b: directResult.lines_b,
+                  opcodes: directResult.opcodes,
+                  matched_lines: directResult.matched_lines,
+                  total_lines_a: directResult.total_lines_a,
+                  total_lines_b: directResult.total_lines_b,
+                  match_ratio: directResult.match_ratio,
+                }}
+              />
+            </div>
+
+            <div className="flex justify-end p-5 border-t border-border">
+              <button
+                onClick={() => setShowDirectDiffModal(false)}
+                className="px-4 py-2 rounded-lg bg-primary text-primary-text font-medium hover:opacity-90 transition-opacity"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Visual Diff Viewer Modal */}
       {diffTarget && (

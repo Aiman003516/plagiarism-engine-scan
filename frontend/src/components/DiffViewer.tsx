@@ -13,10 +13,11 @@ import { AlertTriangle, Loader2 } from 'lucide-react';
 import { plagiarismApi, CompareFilesResult, DiffOpcode } from '../lib/api';
 
 interface DiffViewerProps {
-  projectA: string;
-  fileA: string;
-  projectB: string;
-  fileB: string;
+  projectA?: string;
+  fileA?: string;
+  projectB?: string;
+  fileB?: string;
+  initialData?: CompareFilesResult | null;
 }
 
 /** One rendered row: a real source line, or a filler that keeps panes aligned. */
@@ -117,12 +118,22 @@ function DiffPane({ title, rows, rtl }: { title: string; rows: DiffRow[], rtl?: 
   );
 }
 
-export default function DiffViewer({ projectA, fileA, projectB, fileB }: DiffViewerProps) {
-  const [data, setData] = useState<CompareFilesResult | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+export default function DiffViewer({ projectA, fileA, projectB, fileB, initialData }: DiffViewerProps) {
+  const [data, setData] = useState<CompareFilesResult | null>(initialData || null);
+  const [loading, setLoading] = useState<boolean>(!initialData);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (initialData) {
+      setData(initialData);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    if (!projectA || !fileA || !projectB || !fileB) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -143,7 +154,7 @@ export default function DiffViewer({ projectA, fileA, projectB, fileB }: DiffVie
     return () => {
       cancelled = true;
     };
-  }, [projectA, fileA, projectB, fileB]);
+  }, [projectA, fileA, projectB, fileB, initialData]);
 
   const rowsA = useMemo(() => (data ? buildRows(data.opcodes, data.lines_a, 'a') : []), [data]);
   const rowsB = useMemo(() => (data ? buildRows(data.opcodes, data.lines_b, 'b') : []), [data]);
@@ -188,8 +199,8 @@ export default function DiffViewer({ projectA, fileA, projectB, fileB }: DiffVie
       </div>
 
       <div className="flex flex-col lg:flex-row gap-4">
-        <DiffPane title={`${projectA} — ${fileA}`} rows={rowsA} rtl={isRTL(data.lines_a)} />
-        <DiffPane title={`${projectB} — ${fileB}`} rows={rowsB} rtl={isRTL(data.lines_b)} />
+        <DiffPane title={`${projectA || 'File A'} — ${fileA || 'Document A'}`} rows={rowsA} rtl={isRTL(data.lines_a)} />
+        <DiffPane title={`${projectB || 'File B'} — ${fileB || 'Document B'}`} rows={rowsB} rtl={isRTL(data.lines_b)} />
       </div>
     </div>
   );

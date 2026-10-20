@@ -326,6 +326,27 @@ export interface CompareFilesResult {
   opcodes: DiffOpcode[];
   matched_lines: number;
   match_ratio: number;
+  similarity?: number;
+  total_lines_a?: number;
+  total_lines_b?: number;
+}
+
+export interface DirectCompareFilesResult {
+  file_a_name: string;
+  file_b_name: string;
+  file_type: string;
+  similarity: number;
+  winnowing_score: number;
+  semantic_score: number;
+  containment_score: number;
+  verdict: string;
+  lines_a: string[];
+  lines_b: string[];
+  opcodes: DiffOpcode[];
+  matched_lines: number;
+  match_ratio: number;
+  total_lines_a: number;
+  total_lines_b: number;
 }
 
 export const plagiarismApi = {
@@ -479,7 +500,14 @@ export const plagiarismApi = {
     onComplete: (result: PlagiarismScanResult) => void,
     onError: (errorText: string) => void,
     signal?: AbortSignal,
-    onSession?: (session: ScanStreamSession) => void
+    onSession?: (session: ScanStreamSession) => void,
+    metadata?: {
+      title?: string;
+      abstract?: string;
+      department?: string;
+      year?: string | number;
+      university?: string;
+    }
   ) => {
     const url = `${API_BASE_URL}/api/plagiarism/upload-scan-stream`;
     const token = localStorage.getItem("auth_token");
@@ -489,6 +517,11 @@ export const plagiarismApi = {
     const formData = new FormData();
     formData.append("project_name", projectName);
     formData.append("scan_type", scanType);
+    if (metadata?.title) formData.append("title", metadata.title);
+    if (metadata?.abstract) formData.append("abstract", metadata.abstract);
+    if (metadata?.department) formData.append("department", metadata.department);
+    if (metadata?.year) formData.append("year", String(metadata.year));
+    if (metadata?.university) formData.append("university", metadata.university);
     files.forEach(f => {
       if (f.file) formData.append("files", f.file, f.path || f.file.name);
       else if (f.content && f.path) formData.append("files", new Blob([f.content]), f.path);
@@ -776,6 +809,26 @@ export const plagiarismApi = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
+  /** Direct pairwise comparison of two uploaded standalone files/documents. */
+  compareDirectFiles: async (fileA: File, fileB: File): Promise<DirectCompareFilesResult> => {
+    const formData = new FormData();
+    formData.append("file_a", fileA, fileA.name);
+    formData.append("file_b", fileB, fileB.name);
+    const token = localStorage.getItem("auth_token");
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE_URL}/api/plagiarism/compare-direct-files`, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || "Direct file comparison failed");
+    }
+    return res.json();
+  },
 
   getHistory: () =>
     apiFetch<{ reports: PlagiarismHistoryItem[] }>("/api/plagiarism/history"),

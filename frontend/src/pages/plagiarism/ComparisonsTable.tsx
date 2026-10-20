@@ -1,5 +1,5 @@
-import React from 'react';
-import { BarChart3, ShieldCheck, Loader2 } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { BarChart3, ShieldCheck, Loader2, Search, ChevronLeft, ChevronRight, Filter } from 'lucide-react';
 import type { PlagiarismComparison } from '../../lib/api';
 
 export interface ComparisonsTableProps {
@@ -9,6 +9,11 @@ export interface ComparisonsTableProps {
 }
 
 export function ComparisonsTable({ comparisons, deepScanLoading, onDeepScan }: ComparisonsTableProps) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'CRITICAL' | 'HIGH' | 'LOW' | 'SAFE'>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+
   const renderWhyBadge = (cmp: PlagiarismComparison) => {
     if (cmp.embedded_copy || (cmp.containment_score && cmp.containment_score >= 0.8)) {
       const containmentPct = cmp.containment_score ? `${Math.round(cmp.containment_score * 100)}%` : '>=80%';
@@ -48,7 +53,7 @@ export function ComparisonsTable({ comparisons, deepScanLoading, onDeepScan }: C
   };
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
+    switch (status?.toUpperCase()) {
       case 'CRITICAL':
         return 'bg-red-600/10 text-red-600 dark:text-red-400 border border-red-500/20';
       case 'HIGH':
@@ -61,13 +66,77 @@ export function ComparisonsTable({ comparisons, deepScanLoading, onDeepScan }: C
     }
   };
 
+  // Filtered comparisons
+  const filtered = useMemo(() => {
+    return comparisons.filter((c) => {
+      if (statusFilter !== 'ALL' && c.status?.toUpperCase() !== statusFilter) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const f1 = (c.file1 || '').toLowerCase();
+        const proj = (c.project || '').toLowerCase();
+        const f2 = (c.file2 || c.matched_file || '').toLowerCase();
+        return f1.includes(q) || proj.includes(q) || f2.includes(q);
+      }
+      return true;
+    });
+  }, [comparisons, statusFilter, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pagedComparisons = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
+
   return (
     <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-6 shadow-sm">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
         <h3 className="text-lg font-bold flex items-center gap-2">
           <BarChart3 className="w-5 h-5 text-primary" />
           Matched Files ({comparisons.length})
         </h3>
+
+        {/* Search and Filters */}
+        {comparisons.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative min-w-[200px]">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+              <input
+                type="text"
+                placeholder="Filter by filename or project..."
+                value={searchQuery}
+                onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+                className="w-full bg-surface dark:bg-slate-900 border border-border/60 rounded-lg pl-8 pr-3 py-1.5 text-xs text-text-main placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+
+            <div className="flex items-center gap-1 bg-surface dark:bg-slate-900 border border-border/60 rounded-lg p-0.5 text-xs">
+              {(['ALL', 'CRITICAL', 'HIGH', 'LOW', 'SAFE'] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => { setStatusFilter(s); setPage(1); }}
+                  className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${
+                    statusFilter === s
+                      ? 'bg-primary text-primary-text'
+                      : 'text-text-muted hover:text-text-main'
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+
+            <select
+              value={pageSize}
+              onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+              className="bg-surface dark:bg-slate-900 border border-border/60 rounded-lg px-2 py-1.5 text-xs text-text-main focus:outline-none"
+            >
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
+          </div>
+        )}
       </div>
 
       {comparisons.length === 0 ? (
@@ -76,96 +145,132 @@ export function ComparisonsTable({ comparisons, deepScanLoading, onDeepScan }: C
           <p className="font-medium">No plagiarism matches found!</p>
           <p className="text-sm mt-1">This project appears to be completely original across all indexed projects.</p>
         </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-border/50 dark:border-slate-700">
-          <table className="w-full text-left text-sm">
-            <thead className="sticky top-0 z-10 bg-surface/95 dark:bg-slate-800 backdrop-blur border-b border-border/50 dark:border-slate-700">
-              <tr>
-                <th className="p-3 font-medium text-text-muted">Source File</th>
-                <th className="p-3 font-medium text-text-muted">Matched Project</th>
-                <th className="p-3 font-medium text-text-muted">Matched File</th>
-                <th className="p-3 font-medium text-text-muted">Type</th>
-                <th className="p-3 font-medium text-text-muted">Similarity</th>
-                <th className="p-3 font-medium text-text-muted">Status</th>
-                <th className="p-3 font-medium text-text-muted">Why</th>
-                <th className="p-3 font-medium text-text-muted text-right">AI Verify</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/50 dark:divide-slate-700">
-              {comparisons.map((cmp, i) => {
-                const scanKey = `${cmp.file1}::${cmp.file2}`;
-                const isLoadingThis = deepScanLoading === scanKey;
-
-                return (
-                  <tr key={i} className="hover:bg-surface/50 dark:hover:bg-slate-700/40 transition-colors">
-                    <td className="p-3 font-mono text-xs">{cmp.file1}</td>
-                    <td className="p-3 font-medium">{cmp.project}</td>
-                    <td className="p-3 font-mono text-xs">{cmp.file2 || cmp.matched_file}</td>
-                    <td className="p-3">
-                      <span className={`px-2 py-1 rounded text-xs ${
-                        cmp.type?.toLowerCase() === 'code'
-                          ? 'bg-primary/10 text-primary'
-                          : 'bg-accent/10 text-accent-text dark:text-accent'
-                      }`}>
-                        {cmp.type}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      {cmp.winnowing_score !== undefined ? (
-                        <div className="flex flex-col gap-1.5 w-36">
-                          <div className="flex items-center gap-2 text-[10px]" title="Winnowing: Exact copy-paste detection">
-                            <div className="w-full bg-border rounded-full h-1.5 overflow-hidden">
-                              <div className="bg-blue-500 h-full" style={{ width: `${cmp.winnowing_score}%` }} />
-                            </div>
-                            <span className="w-8 text-right font-medium text-blue-600 dark:text-blue-400">{cmp.winnowing_score}%</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-[10px]" title="Semantic: Paraphrasing & meaning match">
-                            <div className="w-full bg-border rounded-full h-1.5 overflow-hidden">
-                              <div className="bg-purple-500 h-full" style={{ width: `${cmp.semantic_score}%` }} />
-                            </div>
-                            <span className="w-8 text-right font-medium text-purple-600 dark:text-purple-400">{cmp.semantic_score}%</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-[10px]" title={`Fusion: Combined score (alpha=${cmp.alpha ?? 0.6})`}>
-                            <div className="w-full bg-border rounded-full h-1.5 overflow-hidden">
-                              <div className="bg-orange-500 h-full" style={{ width: `${cmp.fusion_score}%` }} />
-                            </div>
-                            <span className="w-8 text-right font-bold text-orange-600 dark:text-orange-400">{cmp.fusion_score}%</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="font-bold">{cmp.similarity}</span>
-                      )}
-                    </td>
-                    <td className="p-3">
-                      <span className={`px-2 py-1 rounded text-xs font-bold ${getStatusBadge(cmp.status)}`}>
-                        {cmp.status}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      {renderWhyBadge(cmp)}
-                    </td>
-                    <td className="p-3 text-right">
-                      {isLoadingThis ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-accent/50 text-accent-text">
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          Scanning
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => onDeepScan(cmp)}
-                          className="px-2.5 py-1 rounded text-xs font-semibold bg-primary text-primary-text hover:opacity-90 transition-all inline-flex items-center gap-1"
-                          title="Run AI Semantic Deep Scan"
-                        >
-                          🔬 Deep Scan
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      ) : filtered.length === 0 ? (
+        <div className="p-8 text-center text-text-muted bg-surface/20 rounded-lg">
+          <p className="font-medium">No matches match your filter criteria.</p>
+          <button
+            onClick={() => { setStatusFilter('ALL'); setSearchQuery(''); }}
+            className="text-xs text-primary hover:underline mt-2 inline-block"
+          >
+            Clear filters
+          </button>
         </div>
+      ) : (
+        <>
+          <div className="overflow-x-auto rounded-xl border border-border/50 dark:border-slate-700">
+            <table className="w-full text-left text-sm">
+              <thead className="sticky top-0 z-10 bg-surface/95 dark:bg-slate-800 backdrop-blur border-b border-border/50 dark:border-slate-700">
+                <tr>
+                  <th className="p-3 font-medium text-text-muted">Source File</th>
+                  <th className="p-3 font-medium text-text-muted">Matched Project</th>
+                  <th className="p-3 font-medium text-text-muted">Matched File</th>
+                  <th className="p-3 font-medium text-text-muted">Type</th>
+                  <th className="p-3 font-medium text-text-muted">Similarity</th>
+                  <th className="p-3 font-medium text-text-muted">Status</th>
+                  <th className="p-3 font-medium text-text-muted">Why</th>
+                  <th className="p-3 font-medium text-text-muted text-right">AI Verify</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50 dark:divide-slate-700">
+                {pagedComparisons.map((cmp, i) => {
+                  const scanKey = `${cmp.file1}::${cmp.file2 || cmp.matched_file}`;
+                  const isLoadingThis = deepScanLoading === scanKey;
+
+                  return (
+                    <tr key={`${cmp.file1}-${cmp.project}-${cmp.file2}-${i}`} className="hover:bg-surface/50 dark:hover:bg-slate-700/40 transition-colors">
+                      <td className="p-3 font-mono text-xs">{cmp.file1}</td>
+                      <td className="p-3 font-medium">{cmp.project}</td>
+                      <td className="p-3 font-mono text-xs">{cmp.file2 || cmp.matched_file}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-1 rounded text-xs ${
+                          cmp.type?.toLowerCase() === 'code'
+                            ? 'bg-primary/10 text-primary'
+                            : 'bg-accent/10 text-accent-text dark:text-accent'
+                        }`}>
+                          {cmp.type}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        {cmp.winnowing_score !== undefined ? (
+                          <div className="flex flex-col gap-1.5 w-36">
+                            <div className="flex items-center gap-2 text-[10px]" title="Winnowing: Exact copy-paste detection">
+                              <div className="w-full bg-border rounded-full h-1.5 overflow-hidden">
+                                <div className="bg-blue-500 h-full" style={{ width: `${cmp.winnowing_score}%` }} />
+                              </div>
+                              <span className="w-8 text-right font-medium text-blue-600 dark:text-blue-400">{cmp.winnowing_score}%</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-[10px]" title="Semantic: Paraphrasing & meaning match">
+                              <div className="w-full bg-border rounded-full h-1.5 overflow-hidden">
+                                <div className="bg-purple-500 h-full" style={{ width: `${cmp.semantic_score}%` }} />
+                              </div>
+                              <span className="w-8 text-right font-medium text-purple-600 dark:text-purple-400">{cmp.semantic_score}%</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-[10px]" title={`Fusion: Combined score (alpha=${cmp.alpha ?? 0.6})`}>
+                              <div className="w-full bg-border rounded-full h-1.5 overflow-hidden">
+                                <div className="bg-orange-500 h-full" style={{ width: `${cmp.fusion_score}%` }} />
+                              </div>
+                              <span className="w-8 text-right font-bold text-orange-600 dark:text-orange-400">{cmp.fusion_score}%</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="font-bold">{cmp.similarity}</span>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        <span className={`px-2 py-1 rounded text-xs font-bold ${getStatusBadge(cmp.status)}`}>
+                          {cmp.status}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        {renderWhyBadge(cmp)}
+                      </td>
+                      <td className="p-3 text-right">
+                        {isLoadingThis ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-accent/50 text-accent-text">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            Scanning
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => onDeepScan(cmp)}
+                            className="px-2.5 py-1 rounded text-xs font-semibold bg-primary text-primary-text hover:opacity-90 transition-all inline-flex items-center gap-1"
+                            title="Run AI Semantic Deep Scan"
+                          >
+                            🔬 Deep Scan
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination Controls */}
+          <div className="flex items-center justify-between mt-4 text-xs text-text-muted">
+            <span>
+              Showing {filtered.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, filtered.length)} of {filtered.length} matches
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                disabled={currentPage <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="px-2.5 py-1 rounded-lg border border-border hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" /> Prev
+              </button>
+              <span>{currentPage} / {totalPages}</span>
+              <button
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="px-2.5 py-1 rounded-lg border border-border hover:bg-surface disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+              >
+                Next <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

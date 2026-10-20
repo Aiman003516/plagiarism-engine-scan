@@ -4,7 +4,13 @@ import os
 import asyncio
 import difflib
 from typing import List, Dict, Any, Optional
-from fastapi import HTTPException, Depends
+from fastapi import HTTPException, Depends, File, UploadFile
+import tempfile
+from pathlib import Path
+from plagiarism_engine.extractor import FileExtractor
+from plagiarism_engine.file_policy import file_type_for
+from plagiarism_engine.fusion_scorer import compute_fusion_score
+from plagiarism_engine.winnowing import WinnowingEngine
 from pydantic import BaseModel
 
 
@@ -212,4 +218,92 @@ async def compare_files_endpoint(req: CompareFilesRequest):
         "opcodes": opcodes,
         "matched_lines": matched_lines,
         "match_ratio": round(matcher.ratio() * 100, 2),
+    }
+
+
+@router.post("/api/plagiarism/compare-direct-files", dependencies=[Depends(require_role())])
+async def compare_direct_files(
+    file_a: UploadFile = File(...),
+    file_b: UploadFile = File(...),
+):
+    """Direct pairwise comparison of any two uploaded documents or code files.
+
+    Accepts PDF, Word (.docx), Source Code, or Plain Text files.
+    Extracts text, computes hybrid similarity score (fusion/Winnowing),
+    and performs line-level diffing for the visual Diff Viewer.
+    """
+    if not file_a or not file_b:
+        raise HTTPException(status_code=400, detail="Both 'file_a' and 'file_b' are required.")
+
+    extractor = FileExtractor()
+
+    def _extract(upload: UploadFile) -> tuple[str, str]:
+        filename = upload.filename or "unknown"
+        ext = Path(filename).suffix.lower()
+        ftype = file_type_for(filename) or "text"
+
+        content_bytes = upload.file.read()
+        if not content_bytes:
+            return "", ftype
+
+        if ext in (".pdf", ".docx"):
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                tmp.write(content_bytes)
+                tmp_path = tmp.name
+            try:
+                if ext == ".pdf":
+                    text = extractor.extract_text_from_pdf(tmp_path)
+                else:
+                    text = extractor.extract_text_from_docx(tmp_path)
+                return text, "text"
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+        else:
+            text = content_bytes.decode("utf-8", errors="replace")
+            return text, ftype
+
+    content_a, type_a = _extract(file_a)
+    content_b, type_b = _extract(file_b)
+
+    if not content_a.strip() or not content_b.strip():
+        raise HTTPException(status_code=400, detail="One or both files contain no extractable text.")
+
+    eff_type = "code" if (type_a == "code" or type_b == "code") else "text"
+    winnow_engine = WinnowingEngine()
+
+    fusion_result = compute_fusion_score(
+        file_a_content=content_a,
+        file_b_content=content_b,
+        file_type=eff_type,
+        winnowing_engine=winnow_engine,
+        filename=file_a.filename or "file_a",
+        filename_b=file_b.filename or "file_b",
+    )
+
+    lines_a = content_a.splitlines()
+    lines_b = content_b.splitlines()
+
+    matcher = difflib.SequenceMatcher(None, lines_a, lines_b)
+    opcodes = matcher.get_opcodes()
+    matched_lines = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in opcodes if tag == "equal")
+
+    return {
+        "file_a_name": file_a.filename,
+        "file_b_name": file_b.filename,
+        "file_type": eff_type,
+        "similarity": fusion_result["fusion_score"],
+        "winnowing_score": fusion_result["winnowing_score"],
+        "semantic_score": fusion_result["semantic_score"],
+        "containment_score": fusion_result["containment_score"],
+        "verdict": fusion_result["verdict"],
+        "lines_a": lines_a,
+        "lines_b": lines_b,
+        "opcodes": opcodes,
+        "matched_lines": matched_lines,
+        "match_ratio": round(matcher.ratio() * 100, 2),
+        "total_lines_a": len(lines_a),
+        "total_lines_b": len(lines_b),
     }

@@ -17,6 +17,7 @@ def _run_intake(
     project_files: List[Dict[str, Any]],
     log_callback=None,
     git_metadata: Optional[Dict[str, Any]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Execute code + text intake (extraction, Winnowing, and DB indexing)."""
     db = get_db()
@@ -68,6 +69,18 @@ def _run_intake(
 
     log("[PHASE 2/3] 💾 Indexing project files into database (with Zlib compression)...")
     db.save_project(project_id=project_name, project_name=project_name, files=project_files)
+    if metadata and hasattr(db, "update_project"):
+        try:
+            db.update_project(
+                project_name,
+                title=metadata.get("title"),
+                abstract=metadata.get("abstract"),
+                department=metadata.get("department"),
+                year=metadata.get("year"),
+                university=metadata.get("university"),
+            )
+        except Exception as e:
+            log(f"   ℹ️ Metadata update note: {e}")
 
     # ------------------------------------------------------------------
     # PERF: Deep Semantic Indexing DECOUPLED from the upload stream.
@@ -130,6 +143,15 @@ def _run_intake(
         if fps:
             batch.append((rel_path, ftype, fps))
     db.store_fingerprints_batch(project_name, batch)
+    try:
+        from app.state import get_vstore
+        from app.services.embeddings import _index_project_embeddings
+        log("🤖 Indexing semantic vector embeddings into pgvector...")
+        vstore = get_vstore()
+        _index_project_embeddings(vstore, db, project_name)
+        log("✅ Semantic embeddings indexed successfully.")
+    except Exception as e:
+        log(f"   ℹ️ Semantic embedding deferred: {e}")
     log(f"✅ Intake complete for project: {project_name}")
 
     result = {
@@ -256,22 +278,24 @@ def _run_analysis(
             total_candidates += 1
             sim_val = min(count / min(total_fps, target_fps), 1.0)
             if ftype == "code":
-                if count >= min_code_fps or is_small_exact or sim_val >= 0.25:
+                if is_small_exact or (sim_val >= 0.15 and count >= 5) or sim_val >= 0.25:
                     all_comparisons.append({
                         "project": other_pid,
                         "file1": rel_path,
                         "file2": other_path,
                         "similarity": f"{round(sim_val * 100, 2)}%",
+                        "raw_sim": sim_val,
                         "type": "Code",
                         "status": "SAFE",
                     })
             elif ftype == "text":
-                if sim_val >= 0.20 or count >= 5 or is_small_exact:
+                if is_small_exact or (sim_val >= 0.15 and count >= 5) or sim_val >= 0.20:
                     all_comparisons.append({
                         "project": other_pid,
                         "file1": rel_path,
                         "file2": other_path,
                         "similarity": f"{round(sim_val * 100, 2)}%",
+                        "raw_sim": sim_val,
                         "type": "Text",
                         "status": "SAFE",
                     })
@@ -309,25 +333,39 @@ def _run_analysis(
                 total_candidates += 1
                 sim_val = min(count / min(total_fps, target_fps), 1.0)
                 if ftype == "code":
-                    if count >= min_code_fps or is_small_exact or sim_val >= 0.25:
+                    if is_small_exact or (sim_val >= 0.15 and count >= 5) or sim_val >= 0.25:
                         all_comparisons.append({
                             "project": other_pid,
                             "file1": rel_path,
                             "file2": other_path,
                             "similarity": f"{round(sim_val * 100, 2)}%",
+                            "raw_sim": sim_val,
                             "type": "Code",
                             "status": "SAFE",
                         })
                 elif ftype == "text":
-                    if sim_val >= 0.20 or count >= 5 or is_small_exact:
+                    if is_small_exact or (sim_val >= 0.15 and count >= 5) or sim_val >= 0.20:
                         all_comparisons.append({
                             "project": other_pid,
                             "file1": rel_path,
                             "file2": other_path,
                             "similarity": f"{round(sim_val * 100, 2)}%",
+                            "raw_sim": sim_val,
                             "type": "Text",
                             "status": "SAFE",
                         })
+
+    # Top-K candidate pruning per source file to eliminate Cartesian product explosion
+    if all_comparisons:
+        by_source: Dict[str, List[Dict[str, Any]]] = {}
+        for c_item in all_comparisons:
+            by_source.setdefault(c_item["file1"], []).append(c_item)
+        pruned: List[Dict[str, Any]] = []
+        for src_path, c_list in by_source.items():
+            c_list.sort(key=lambda x: x.get("raw_sim", 0.0), reverse=True)
+            pruned.extend(c_list[:10])  # keep top 10 matches per source file
+        pruned.sort(key=lambda x: x.get("raw_sim", 0.0), reverse=True)
+        all_comparisons = pruned[:300]  # Cap candidate comparisons to top 300
 
     log(f"   ✅ Scan complete: {len(all_comparisons)} matches from {total_candidates} candidates.")
 
@@ -430,8 +468,13 @@ def _run_analysis(
     max_fusion_score = 0.0
     final_verdict = "SAFE"
     report_rows = []
-    
-    for cmp in all_comparisons:
+    total_cmps = len(all_comparisons)
+    log(f"   🧬 Fusing {total_cmps} comparison pairs...")
+
+    for idx, cmp in enumerate(all_comparisons):
+        if idx > 0 and (idx % 25 == 0 or idx == total_cmps - 1):
+            pct = round((idx / total_cmps) * 100)
+            log(f"   ⚡ Fused {idx}/{total_cmps} comparisons ({pct}%)...")
         try:
             other_pid = cmp["project"]
             rel_path = cmp["file1"]
@@ -445,11 +488,9 @@ def _run_analysis(
                 target_content = target_files[0].get("content", "") if target_files else ""
 
             if source_content and target_content:
-                # Get the pre-calculated Semantic Score from pgvector (or compute pair similarity if not in top-k)
+                # Get the pre-calculated Semantic Score from pgvector (fast O(1) lookup)
                 sem_key = (rel_path, other_pid, other_path)
-                precalc_semantic_score = semantic_lookup.get(sem_key)
-                if precalc_semantic_score is None:
-                    precalc_semantic_score = vstore.get_pair_similarity(project_name, rel_path, other_pid, other_path)
+                precalc_semantic_score = semantic_lookup.get(sem_key, 0.0)
 
                 # Execute Hybrid Fusion Math
                 fusion_result = compute_fusion_score(
@@ -554,7 +595,11 @@ def _run_analysis(
         "text_similarity": round(max_text_sim, 2),
         "verdict": verdict,
         "threshold": threshold_val,
-        "comparisons": all_comparisons,
+        "comparisons": sorted(
+            [c for c in all_comparisons if float(str(c.get("fusion_score") or c.get("similarity") or "0").replace("%", "")) > 0] or all_comparisons[:20],
+            key=lambda x: float(str(x.get("fusion_score") or x.get("similarity") or "0").replace("%", "")),
+            reverse=True
+        )[:150],
         "code_files_count": len(code_files),
         "text_files_count": len(text_files),
         "total_files": len(project_files),

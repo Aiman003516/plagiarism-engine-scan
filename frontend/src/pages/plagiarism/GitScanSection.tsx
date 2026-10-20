@@ -17,6 +17,8 @@ export function GitScanSection() {
   const [gitProjectTitle, setGitProjectTitle] = useState<string>("");
 
   const isScanning = useScanStore((s) => s.isScanning);
+  const scanSource = useScanStore((s) => s.scanSource);
+  const isIntakeScanning = isScanning && (scanSource === "intake" || !scanSource);
 
   // Start Git Repository Scan with Real-Time Streaming
   const startGitScan = async () => {
@@ -171,10 +173,10 @@ export function GitScanSection() {
 
         <button 
           onClick={startGitScan}
-          disabled={isScanning || !gitRepoUrl.trim()}
+          disabled={isIntakeScanning || !gitRepoUrl.trim()}
           className="w-full sm:w-auto bg-primary hover:bg-primary-hover text-primary-text font-bold text-base rounded-xl px-8 py-3.5 shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
         >
-          {isScanning ? (
+          {isIntakeScanning ? (
             <>
               <RefreshCw className="w-5 h-5 animate-spin" />
               {t("processing_files")}

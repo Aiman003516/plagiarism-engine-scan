@@ -2,7 +2,8 @@ import React, { useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Search, UploadCloud, Cpu, FileArchive, Trash2,
-  FilePlus, RefreshCw
+  FilePlus, RefreshCw, AlertTriangle, ChevronDown, ChevronUp,
+  BookOpen, Building, Calendar, GraduationCap, X
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
@@ -30,7 +31,18 @@ export function UploadSection() {
   const processedFilesCount = useScanStore((s) => s.processedFilesCount);
   const processingPhase = useScanStore((s) => s.processingPhase);
   const isScanning = useScanStore((s) => s.isScanning);
+  const scanSource = useScanStore((s) => s.scanSource);
+  const scanError = useScanStore((s) => s.scanError);
+  const isIntakeScanning = isScanning && (scanSource === "intake" || !scanSource);
   const bloatFilteredCount = useScanStore((s) => s.bloatFilteredCount);
+
+  // Project Academic Metadata State
+  const [metaTitle, setMetaTitle] = useState("");
+  const [metaDepartment, setMetaDepartment] = useState("");
+  const [metaYear, setMetaYear] = useState<string>(new Date().getFullYear().toString());
+  const [metaUniversity, setMetaUniversity] = useState("");
+  const [metaAbstract, setMetaAbstract] = useState("");
+  const [showMetadata, setShowMetadata] = useState(false);
 
   const [showExplorer, setShowExplorer] = useState(false);
   const [stagedSearch, setStagedSearch] = useState("");
@@ -224,7 +236,7 @@ export function UploadSection() {
   });
 
   const startDirectScan = async () => {
-    if (isScanning) return;
+    if (isIntakeScanning) return;
     if (uploadedFiles.length === 0) {
       toast.error(t("no_files_staged"));
       return;
@@ -279,6 +291,11 @@ export function UploadSection() {
         formData.append("project_name", activeProjectName);
         formData.append("scan_type", "ZIP Archive Scan");
         formData.append("file", zipFile.file, zipFile.name);
+        if (metaTitle.trim()) formData.append("title", metaTitle.trim());
+        if (metaAbstract.trim()) formData.append("abstract", metaAbstract.trim());
+        if (metaDepartment.trim()) formData.append("department", metaDepartment.trim());
+        if (metaYear.trim()) formData.append("year", metaYear.trim());
+        if (metaUniversity.trim()) formData.append("university", metaUniversity.trim());
 
         appendLog(`[${new Date().toLocaleTimeString()}] [UPLOAD] Sending ${zipFile.name} (${formatFileSize(zipFile.size)})...`);
         appendLog("[STATUS] Waiting for backend logs. This endpoint may buffer logs until processing finishes.");
@@ -321,7 +338,14 @@ export function UploadSection() {
           onComplete,
           onError,
           controller.signal,
-          handleStreamSession
+          handleStreamSession,
+          {
+            title: metaTitle.trim() || undefined,
+            abstract: metaAbstract.trim() || undefined,
+            department: metaDepartment.trim() || undefined,
+            year: metaYear.trim() || undefined,
+            university: metaUniversity.trim() || undefined,
+          }
         );
       }
     } catch (error) {
@@ -464,6 +488,115 @@ export function UploadSection() {
         />
       </div>
 
+      {/* Intake-Scoped Error / Duplicate Notice */}
+      {scanError && (scanSource === "intake" || !scanSource) && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-red-600 dark:text-red-400 flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-red-500" />
+            <div>
+              <h4 className="font-bold text-sm">Intake Notice</h4>
+              <p className="text-xs mt-0.5 leading-relaxed">{scanError}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => useScanStore.getState().failScan("")}
+            className="text-text-muted hover:text-text-main p-1"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Academic & Project Metadata Card */}
+      <div className="glass-card !p-5">
+        <button
+          type="button"
+          onClick={() => setShowMetadata(!showMetadata)}
+          className="w-full flex items-center justify-between text-left"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-primary/10 rounded-xl border border-primary/20 text-primary">
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-text-main">Academic & Project Metadata</h4>
+              <p className="text-xs text-text-muted">
+                {showMetadata ? "Optional details for institutional cataloging and database records." : "Click to specify Title, Abstract, Department, Year, and University."}
+              </p>
+            </div>
+          </div>
+          {showMetadata ? <ChevronUp className="w-4 h-4 text-text-muted" /> : <ChevronDown className="w-4 h-4 text-text-muted" />}
+        </button>
+
+        {showMetadata && (
+          <div className="mt-4 pt-4 border-t border-glass-border space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-text-muted mb-1 flex items-center gap-1.5">
+                  <BookOpen className="w-3.5 h-3.5" /> Full Project Title
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Autonomous Robotic Navigation Using Deep RL"
+                  value={metaTitle}
+                  onChange={(e) => setMetaTitle(e.target.value)}
+                  className="w-full bg-surface border border-glass-border rounded-lg px-3 py-2 text-xs text-text-main focus:outline-none focus:border-primary/50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-text-muted mb-1 flex items-center gap-1.5">
+                  <GraduationCap className="w-3.5 h-3.5" /> University / Institution
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Stanford University"
+                  value={metaUniversity}
+                  onChange={(e) => setMetaUniversity(e.target.value)}
+                  className="w-full bg-surface border border-glass-border rounded-lg px-3 py-2 text-xs text-text-main focus:outline-none focus:border-primary/50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-text-muted mb-1 flex items-center gap-1.5">
+                  <Building className="w-3.5 h-3.5" /> Department
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Computer Science & AI"
+                  value={metaDepartment}
+                  onChange={(e) => setMetaDepartment(e.target.value)}
+                  className="w-full bg-surface border border-glass-border rounded-lg px-3 py-2 text-xs text-text-main focus:outline-none focus:border-primary/50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-text-muted mb-1 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5" /> Academic Year
+                </label>
+                <input
+                  type="number"
+                  placeholder="2026"
+                  value={metaYear}
+                  onChange={(e) => setMetaYear(e.target.value)}
+                  className="w-full bg-surface border border-glass-border rounded-lg px-3 py-2 text-xs text-text-main focus:outline-none focus:border-primary/50"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-text-muted mb-1">
+                Abstract / Executive Summary
+              </label>
+              <textarea
+                rows={3}
+                placeholder="Briefly describe the project goals, methodologies, findings, or algorithms..."
+                value={metaAbstract}
+                onChange={(e) => setMetaAbstract(e.target.value)}
+                className="w-full bg-surface border border-glass-border rounded-lg p-3 text-xs text-text-main focus:outline-none focus:border-primary/50 resize-none"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 glass-card !p-5">
         <div className="flex items-center gap-3">
           <div className="p-3 bg-accent/15 rounded-xl border border-accent/30 text-primary dark:text-accent">
@@ -488,10 +621,10 @@ export function UploadSection() {
 
           <button
             onClick={startDirectScan}
-            disabled={isScanning || isProcessingFiles || isTraversing || uploadedFiles.length === 0}
+            disabled={isIntakeScanning || isProcessingFiles || isTraversing || uploadedFiles.length === 0}
             className="w-full sm:w-auto bg-primary hover:bg-primary-hover text-primary-text font-bold text-base rounded-xl px-8 py-3.5 shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
           >
-            {isScanning ? (
+            {isIntakeScanning ? (
               <>
                 <RefreshCw className="w-5 h-5 animate-spin" />
                 {t("processing_files")}

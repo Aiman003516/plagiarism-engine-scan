@@ -119,6 +119,11 @@ async def upload_and_scan_stream(
     project_name: str = Form(...),
     scan_type: str = Form("Direct Upload Project Scan"),
     files: List[UploadFile] = File(...),
+    title: Optional[str] = Form(None),
+    abstract: Optional[str] = Form(None),
+    department: Optional[str] = Form(None),
+    year: Optional[int] = Form(None),
+    university: Optional[str] = Form(None),
 ):
     # Read files synchronously first
     extracted_files = []
@@ -160,7 +165,14 @@ async def upload_and_scan_stream(
 
         def run_intake():
             try:
-                res = _run_intake(project_name, extracted_files, log_callback=log_callback)
+                metadata = {
+                    "title": title,
+                    "abstract": abstract,
+                    "department": department,
+                    "year": year,
+                    "university": university,
+                }
+                res = _run_intake(project_name, extracted_files, log_callback=log_callback, metadata=metadata)
                 session.publish({"type": "complete", "result": res})
             except Exception as e:
                 session.publish({"type": "error", "message": str(e)})
@@ -187,6 +199,11 @@ async def upload_zip_stream(
     project_name: str = Form(...),
     scan_type: str = Form("ZIP Archive Scan"),
     file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    abstract: Optional[str] = Form(None),
+    department: Optional[str] = Form(None),
+    year: Optional[int] = Form(None),
+    university: Optional[str] = Form(None),
 ):
     import zipfile
 
@@ -240,7 +257,14 @@ async def upload_zip_stream(
                     if "relative_path" not in f:
                         f["relative_path"] = f.get("filename", "")
 
-                res = _run_intake(project_name, extracted_files, log_callback=log_callback)
+                metadata = {
+                    "title": title,
+                    "abstract": abstract,
+                    "department": department,
+                    "year": year,
+                    "university": university,
+                }
+                res = _run_intake(project_name, extracted_files, log_callback=log_callback, metadata=metadata)
                 session.publish({"type": "complete", "result": res})
             except Exception as e:
                 session.publish({"type": "error", "message": str(e)})
