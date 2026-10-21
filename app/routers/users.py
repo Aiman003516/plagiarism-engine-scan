@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from fastapi import HTTPException, Depends
 from pydantic import BaseModel
 import bcrypt

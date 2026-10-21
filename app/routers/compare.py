@@ -4,7 +4,7 @@ import os
 import asyncio
 import difflib
 from typing import List, Dict, Any, Optional
-from fastapi import HTTPException, Depends, File, UploadFile
+from fastapi import HTTPException, Depends, File, UploadFile, Form
 import tempfile
 from pathlib import Path
 from plagiarism_engine.extractor import FileExtractor
