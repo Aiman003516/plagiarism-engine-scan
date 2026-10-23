@@ -15,6 +15,7 @@ import { Toaster } from "react-hot-toast";
 import { RefreshCw } from "lucide-react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Sidebar from "./Sidebar";
+import RoleGuard from "./components/RoleGuard";
 
 // --- Phase 1 pages: lazy imports ---
 // Existing pages
@@ -119,13 +120,29 @@ export default function App() {
             {/* Protected application routes — require auth_token + app chrome */}
             <Route element={<ProtectedRoute />}>
               <Route element={<AppLayout />}>
-                <Route path="/" element={<ProjectIntake />} />
-                <Route path="/scan" element={<PlagiarismScanner />} />
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/projects" element={<Projects />} />
-                <Route path="/teams" element={<Teams />} />
-                <Route path="/users" element={<UsersPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
+                {/* Routes accessible to Students and Academic Staff */}
+                <Route element={<RoleGuard allowedRoles={["student", "faculty", "college_admin", "university_admin", "ministry_admin"]} />}>
+                  <Route path="/projects" element={<Projects />} />
+                  <Route path="/teams" element={<Teams />} />
+                </Route>
+
+                {/* Scanners & Intake strictly for Staff and Admins */}
+                <Route element={<RoleGuard allowedRoles={["faculty", "college_admin", "university_admin", "ministry_admin"]} />}>
+                  <Route path="/" element={<ProjectIntake />} />
+                  <Route path="/scan" element={<PlagiarismScanner />} />
+                  <Route path="/dashboard" element={<Dashboard />} />
+                </Route>
+
+                {/* Institutional User Administration */}
+                <Route element={<RoleGuard allowedRoles={["college_admin", "university_admin", "ministry_admin"]} />}>
+                  <Route path="/users" element={<UsersPage />} />
+                </Route>
+
+                {/* System Settings */}
+                <Route element={<RoleGuard allowedRoles={["university_admin", "ministry_admin"]} />}>
+                  <Route path="/settings" element={<SettingsPage />} />
+                </Route>
+
                 <Route
                   path="/force-change-password"
                   element={<ForceChangePasswordPage />}

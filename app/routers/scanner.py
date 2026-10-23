@@ -69,7 +69,7 @@ async def reconnect_scan_stream(
 
 
 # --- Upload + Scan (JSON response) ---
-@router.post("/api/plagiarism/upload-scan", dependencies=[Depends(require_role())])
+@router.post("/api/plagiarism/upload-scan", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def upload_and_scan(
     project_name: str = Form(...),
     scan_type: str = Form("Direct Upload Project Scan"),
@@ -114,7 +114,7 @@ async def upload_and_scan(
 
 
 # --- Upload + Scan (SSE Streaming) ---
-@router.post("/api/plagiarism/upload-scan-stream", dependencies=[Depends(require_role())])
+@router.post("/api/plagiarism/upload-scan-stream", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def upload_and_scan_stream(
     project_name: str = Form(...),
     scan_type: str = Form("Direct Upload Project Scan"),
@@ -194,7 +194,7 @@ async def upload_and_scan_stream(
 
 
 # --- Upload + Scan ZIP Archive (SSE Streaming) ---
-@router.post("/api/plagiarism/upload-zip-stream", dependencies=[Depends(require_role())])
+@router.post("/api/plagiarism/upload-zip-stream", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def upload_zip_stream(
     project_name: str = Form(...),
     scan_type: str = Form("ZIP Archive Scan"),
@@ -287,7 +287,7 @@ async def upload_zip_stream(
 
 
 # --- Git Repo Scan (JSON) ---
-@router.post("/api/plagiarism/git-scan", dependencies=[Depends(require_role())])
+@router.post("/api/plagiarism/git-scan", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def git_scan(payload: GitScanRequest):
     tmp_dir, git_metadata = _clone_git_repo(payload.repo_url, payload.branch or "main", payload.access_token)
 
@@ -313,7 +313,7 @@ async def git_scan(payload: GitScanRequest):
 
 
 # --- Git Repo Scan (SSE Streaming) ---
-@router.post("/api/plagiarism/git-scan-stream", dependencies=[Depends(require_role())])
+@router.post("/api/plagiarism/git-scan-stream", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def git_scan_stream(payload: GitScanRequest):
     # Resolve the project id up-front so the resumable session can be keyed by it
     # (the worker below previously derived it only after cloning).
@@ -368,7 +368,7 @@ async def git_scan_stream(payload: GitScanRequest):
 
 
 # --- Saved Project Scan (SSE Streaming) ---
-@router.post("/api/plagiarism/scan-stream", dependencies=[Depends(require_role())])
+@router.post("/api/plagiarism/scan-stream", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def run_scan_stream(req: ScanRequest):
     target = req.target
     if not target:
@@ -407,7 +407,7 @@ async def run_scan_stream(req: ScanRequest):
 
 
 # --- Named scan on already-indexed project (Synchronous fallback) ---
-@router.post("/api/plagiarism/scan", dependencies=[Depends(require_role())])
+@router.post("/api/plagiarism/scan", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def run_scan(req: ScanRequest):
     target = req.target
     if not target:

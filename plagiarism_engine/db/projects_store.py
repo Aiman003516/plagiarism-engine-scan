@@ -206,7 +206,10 @@ class ProjectsStoreMixin:
         conn = self._get_connection()
         try:
             cur = conn.cursor()
-            allowed = {"name", "title", "abstract", "team_id", "department", "year", "university", "status"}
+            allowed = {
+                "name", "title", "abstract", "team_id", "department", "year", "university", "status",
+                "university_id", "college_id", "department_id", "abstract_embedding", "abstract_embedding_binary"
+            }
             updates = {}
             for key, value in fields.items():
                 if key in allowed and value is not None:

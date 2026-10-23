@@ -24,7 +24,9 @@ class UserCreate(BaseModel):
     enrollment_number: Optional[str] = None
     password: Optional[str] = None
     role: str
+    university_id: Optional[str] = None
     college_id: Optional[str] = None
+    department_id: Optional[str] = None
     department: Optional[str] = None
     university: Optional[str] = None
 
@@ -32,7 +34,9 @@ class UserCreate(BaseModel):
 class StudentBulkImportItem(BaseModel):
     name: str
     enrollment_number: str
+    university_id: Optional[str] = None
     college_id: Optional[str] = None
+    department_id: Optional[str] = None
     department: Optional[str] = None
     university: Optional[str] = None
     password: Optional[str] = None
@@ -47,7 +51,9 @@ class UserUpdate(BaseModel):
     email: Optional[str] = None
     password: Optional[str] = None
     role: Optional[str] = None
+    university_id: Optional[str] = None
     college_id: Optional[str] = None
+    department_id: Optional[str] = None
     requires_password_change: Optional[bool] = None
 
 
@@ -58,34 +64,96 @@ def _serialize_user(user: dict) -> dict:
         "name": user["name"],
         "email": user["email"],
         "role": user["role"],
+        "university_id": user.get("university_id"),
         "college_id": user.get("college_id"),
+        "department_id": user.get("department_id"),
         "requires_password_change": bool(user.get("requires_password_change")),
         "created_at": user.get("created_at"),
     }
 
 
-@router.get("/api/users", dependencies=[Depends(require_role("ministry_admin", "college_admin"))])
-async def list_users(role: Optional[str] = None, college_id: Optional[str] = None):
+@router.get("/api/users")
+async def list_users(
+    role: Optional[str] = None,
+    college_id: Optional[str] = None,
+    university_id: Optional[str] = None,
+    current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin")),
+):
     db = get_db()
     loop = asyncio.get_running_loop()
     users = await loop.run_in_executor(None, lambda: db.get_all_users(role_filter=role))
-    if college_id is not None:
-        users = [u for u in users if u.get("college_id") == college_id]
+
+    caller_role = current_user.get("role")
+    caller_record = await loop.run_in_executor(None, lambda: db.get_user_by_id(current_user["user_id"])) or {}
+
+    if caller_role == "college_admin":
+        caller_college = caller_record.get("college_id")
+        users = [
+            u for u in users
+            if (u.get("college_id") == caller_college or u.get("id") == current_user["user_id"])
+            and u.get("role") in ("faculty", "student", "college_admin")
+        ]
+    elif caller_role == "university_admin":
+        caller_uni = caller_record.get("university_id")
+        users = [
+            u for u in users
+            if (u.get("university_id") == caller_uni or not u.get("university_id"))
+            and u.get("role") != "ministry_admin"
+        ]
+    else:
+        # ministry_admin can view all users, filtered optionally by query params
+        if college_id is not None:
+            users = [u for u in users if u.get("college_id") == college_id]
+        if university_id is not None:
+            users = [u for u in users if u.get("university_id") == university_id]
+
     return {"users": [_serialize_user(u) for u in users]}
 
 
 @router.post("/api/users")
 async def create_user_endpoint(
     payload: UserCreate,
-    current_user: dict = Depends(require_role("ministry_admin", "college_admin")),
+    current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin")),
 ):
     db = get_db()
     loop = asyncio.get_running_loop()
     name = payload.name.strip()
 
-    valid_roles = {"ministry_admin", "college_admin", "faculty", "student"}
+    valid_roles = {"ministry_admin", "university_admin", "college_admin", "faculty", "student"}
     if payload.role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(sorted(valid_roles))}")
+
+    caller_role = current_user.get("role")
+    caller_record = await loop.run_in_executor(None, lambda: db.get_user_by_id(current_user["user_id"])) or {}
+
+    # Enforce delegation hierarchy
+    if caller_role == "college_admin":
+        if payload.role not in ("faculty", "student"):
+            raise HTTPException(
+                status_code=403,
+                detail="College administrators can only create faculty and student accounts."
+            )
+        caller_college = caller_record.get("college_id")
+        if payload.college_id and caller_college and payload.college_id != caller_college:
+            raise HTTPException(
+                status_code=403,
+                detail="College administrators cannot create users for a different college."
+            )
+        payload.college_id = caller_college
+        payload.university_id = caller_record.get("university_id")
+    elif caller_role == "university_admin":
+        if payload.role in ("ministry_admin", "university_admin"):
+            raise HTTPException(
+                status_code=403,
+                detail="University administrators cannot assign roles at or above their level."
+            )
+        caller_uni = caller_record.get("university_id")
+        if payload.university_id and caller_uni and payload.university_id != caller_uni:
+            raise HTTPException(
+                status_code=403,
+                detail="University administrators cannot create users for a different university."
+            )
+        payload.university_id = caller_uni
 
     # Determine identifier (email or enrollment number for student)
     if payload.role == "student":
@@ -133,9 +201,13 @@ async def create_user_endpoint(
             )
             # Also sync into users table so student can authenticate
             db.create_user(user_id, name, senum, password_hash, "student", payload.college_id)
+            if payload.university_id or payload.department_id:
+                db.update_user(user_id, university_id=payload.university_id, department_id=payload.department_id)
             return "OK", db.get_user_by_id(user_id)
         else:
             db.create_user(user_id, name, email, password_hash, payload.role, payload.college_id)
+            if payload.university_id or payload.department_id:
+                db.update_user(user_id, university_id=payload.university_id, department_id=payload.department_id)
             return "OK", db.get_user_by_id(user_id)
 
     status, user = await loop.run_in_executor(None, _precheck_and_create)
@@ -149,11 +221,16 @@ async def create_user_endpoint(
     return _serialize_user(user)
 
 
-@router.post("/api/users/bulk-import-students", dependencies=[Depends(require_role("ministry_admin", "college_admin"))])
-async def bulk_import_students(payload: StudentBulkImportPayload):
+@router.post("/api/users/bulk-import-students")
+async def bulk_import_students(
+    payload: StudentBulkImportPayload,
+    current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin")),
+):
     """Batch import students from parsed CSV or Excel payload."""
     db = get_db()
     loop = asyncio.get_running_loop()
+    caller_role = current_user.get("role")
+    caller_record = await loop.run_in_executor(None, lambda: db.get_user_by_id(current_user["user_id"])) or {}
 
     def _batch_import():
         imported = 0
@@ -163,7 +240,7 @@ async def bulk_import_students(payload: StudentBulkImportPayload):
             enum = s.enrollment_number.strip()
             name = s.name.strip()
             if not enum or not name:
-                errors.append(f"Row skipped: missing name or enrollment number")
+                errors.append("Row skipped: missing name or enrollment number")
                 continue
             if db.get_student_by_enrollment_number(enum):
                 skipped += 1
@@ -171,6 +248,8 @@ async def bulk_import_students(payload: StudentBulkImportPayload):
             pwd = s.password or "123456"
             pwd_hash = bcrypt.hashpw(pwd.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
             uid = str(uuid.uuid4())
+            effective_college = caller_record.get("college_id") if caller_role == "college_admin" else (s.college_id or caller_record.get("college_id"))
+            effective_uni = caller_record.get("university_id") if caller_role in ("college_admin", "university_admin") else (s.university_id or caller_record.get("university_id"))
             try:
                 db.create_student(
                     id=uid,
@@ -179,7 +258,9 @@ async def bulk_import_students(payload: StudentBulkImportPayload):
                     password_hash=pwd_hash,
                     requires_password_change=True,
                 )
-                db.create_user(uid, name, enum, pwd_hash, "student", s.college_id)
+                db.create_user(uid, name, enum, pwd_hash, "student", effective_college)
+                if effective_uni or s.department_id:
+                    db.update_user(uid, university_id=effective_uni, department_id=s.department_id)
                 imported += 1
             except Exception as e:
                 errors.append(f"Error importing {enum}: {str(e)}")
@@ -189,13 +270,28 @@ async def bulk_import_students(payload: StudentBulkImportPayload):
     return {"imported": imported, "skipped": skipped, "errors": errors}
 
 
-@router.get("/api/users/{user_id}", dependencies=[Depends(require_role("ministry_admin", "college_admin"))])
-async def get_user(user_id: str):
+@router.get("/api/users/{user_id}")
+async def get_user(
+    user_id: str,
+    current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin")),
+):
     db = get_db()
     loop = asyncio.get_running_loop()
     user = await loop.run_in_executor(None, lambda: db.get_user_by_id(user_id))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    caller_role = current_user.get("role")
+    caller_record = await loop.run_in_executor(None, lambda: db.get_user_by_id(current_user["user_id"])) or {}
+    if caller_role == "college_admin":
+        caller_college = caller_record.get("college_id")
+        if user.get("college_id") != caller_college and user.get("id") != current_user["user_id"]:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to view a user from another college.")
+    elif caller_role == "university_admin":
+        caller_uni = caller_record.get("university_id")
+        if user.get("university_id") and caller_uni and user.get("university_id") != caller_uni:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to view a user from another university.")
+
     return _serialize_user(user)
 
 
@@ -203,25 +299,53 @@ async def get_user(user_id: str):
 async def update_user_endpoint(
     user_id: str,
     payload: UserUpdate,
-    current_user: dict = Depends(require_role("ministry_admin", "college_admin")),
+    current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin")),
 ):
     db = get_db()
     loop = asyncio.get_running_loop()
 
-    # --- Admin Self-Lock validation before heavy work --------------------
+    # --- Admin Self-Lock validation --------------------------------------
     if payload.role is not None and current_user["user_id"] == user_id and current_user["role"] != payload.role:
         raise HTTPException(status_code=403, detail="Admins cannot modify their own roles.")
     if payload.role is not None:
-        valid_roles = {"ministry_admin", "college_admin", "faculty", "student"}
+        valid_roles = {"ministry_admin", "university_admin", "college_admin", "faculty", "student"}
         if payload.role not in valid_roles:
             raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(sorted(valid_roles))}")
-    # ---------------------------------------------------------------------
+
+    existing = await loop.run_in_executor(None, lambda: db.get_user_by_id(user_id))
+    if not existing:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    caller_role = current_user.get("role")
+    caller_record = await loop.run_in_executor(None, lambda: db.get_user_by_id(current_user["user_id"])) or {}
+
+    # --- Last Ministry Admin Guard ---------------------------------------
+    if existing.get("role") == "ministry_admin" and payload.role is not None and payload.role != "ministry_admin":
+        all_users = await loop.run_in_executor(None, lambda: db.get_all_users())
+        min_admins = [u for u in all_users if u.get("role") == "ministry_admin"]
+        if len(min_admins) <= 1:
+            raise HTTPException(status_code=400, detail="Cannot demote the last active ministry administrator.")
+
+    # --- Scope & Role Delegation Guards ----------------------------------
+    if caller_role == "college_admin":
+        caller_college = caller_record.get("college_id")
+        if existing.get("college_id") != caller_college and current_user["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to modify a user from another college.")
+        if current_user["user_id"] != user_id and existing.get("role") in ("ministry_admin", "university_admin", "college_admin"):
+            raise HTTPException(status_code=403, detail="College administrators cannot modify administrative accounts.")
+        if payload.role is not None and payload.role not in ("faculty", "student"):
+            raise HTTPException(status_code=403, detail="College administrators can only assign faculty or student roles.")
+
+    elif caller_role == "university_admin":
+        caller_uni = caller_record.get("university_id")
+        if existing.get("university_id") and caller_uni and existing.get("university_id") != caller_uni:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to modify a user from another university.")
+        if current_user["user_id"] != user_id and existing.get("role") in ("ministry_admin", "university_admin"):
+            raise HTTPException(status_code=403, detail="University administrators cannot modify ministry or university administrator accounts.")
+        if payload.role is not None and payload.role in ("ministry_admin", "university_admin"):
+            raise HTTPException(status_code=403, detail="University administrators cannot promote users to ministry or university administrator.")
 
     def _update():
-        existing = db.get_user_by_id(user_id)
-        if not existing:
-            return "NOT_FOUND", None
-
         if payload.email is not None:
             email = payload.email.strip().lower()
             other = db.get_user_by_email(email)
@@ -239,6 +363,10 @@ async def update_user_endpoint(
             fields["role"] = payload.role
         if payload.college_id is not None:
             fields["college_id"] = payload.college_id
+        if payload.university_id is not None:
+            fields["university_id"] = payload.university_id
+        if payload.department_id is not None:
+            fields["department_id"] = payload.department_id
         if payload.requires_password_change is not None:
             fields["requires_password_change"] = payload.requires_password_change
 
@@ -248,27 +376,50 @@ async def update_user_endpoint(
         return "OK", db.get_user_by_id(user_id)
 
     status, user = await loop.run_in_executor(None, _update)
-    if status == "NOT_FOUND":
-        raise HTTPException(status_code=404, detail="User not found")
     if status == "EMAIL_REGISTERED":
         raise HTTPException(status_code=400, detail="Email already registered")
 
     return _serialize_user(user)
 
 
-@router.delete("/api/users/{user_id}", dependencies=[Depends(require_role("ministry_admin", "college_admin"))])
-async def delete_user_endpoint(user_id: str):
+@router.delete("/api/users/{user_id}")
+async def delete_user_endpoint(
+    user_id: str,
+    current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin")),
+):
+    # --- Self Deletion Guard ---------------------------------------------
+    if current_user["user_id"] == user_id:
+        raise HTTPException(status_code=400, detail="Admins cannot delete their own account.")
+
     db = get_db()
     loop = asyncio.get_running_loop()
-
-    def _delete():
-        existing = db.get_user_by_id(user_id)
-        if not existing:
-            return False
-        db.delete_user(user_id)
-        return True
-
-    found = await loop.run_in_executor(None, _delete)
-    if not found:
+    existing = await loop.run_in_executor(None, lambda: db.get_user_by_id(user_id))
+    if not existing:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # --- Last Ministry Admin Guard ---------------------------------------
+    if existing.get("role") == "ministry_admin":
+        all_users = await loop.run_in_executor(None, lambda: db.get_all_users())
+        min_admins = [u for u in all_users if u.get("role") == "ministry_admin"]
+        if len(min_admins) <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the last active ministry administrator.")
+
+    caller_role = current_user.get("role")
+    caller_record = await loop.run_in_executor(None, lambda: db.get_user_by_id(current_user["user_id"])) or {}
+
+    # --- Scope Guards ----------------------------------------------------
+    if caller_role == "college_admin":
+        caller_college = caller_record.get("college_id")
+        if existing.get("college_id") != caller_college:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to delete a user from another college.")
+        if existing.get("role") in ("ministry_admin", "university_admin", "college_admin"):
+            raise HTTPException(status_code=403, detail="College administrators cannot delete administrator accounts.")
+    elif caller_role == "university_admin":
+        caller_uni = caller_record.get("university_id")
+        if existing.get("university_id") and caller_uni and existing.get("university_id") != caller_uni:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to delete a user from another university.")
+        if existing.get("role") in ("ministry_admin", "university_admin"):
+            raise HTTPException(status_code=403, detail="University administrators cannot delete ministry or university administrator accounts.")
+
+    await loop.run_in_executor(None, lambda: db.delete_user(user_id))
     return {"detail": "User deleted"}

@@ -33,7 +33,11 @@ export default function Login() {
           state: { oldPassword: password },
         });
       } else {
-        navigate("/dashboard");
+        if (res.user.role === "student") {
+          navigate("/projects");
+        } else {
+          navigate("/dashboard");
+        }
       }
     } catch (err: any) {
       toast.error(err?.message || t("invalid_credentials"));

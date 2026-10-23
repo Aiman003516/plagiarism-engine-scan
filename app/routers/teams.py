@@ -30,15 +30,30 @@ class TeamMemberAdd(BaseModel):
     enrollment_number: str
 
 
-@router.get("/api/teams", dependencies=[Depends(require_role())])
-async def list_teams(college_id: Optional[str] = None):
+@router.get("/api/teams")
+async def list_teams(college_id: Optional[str] = None, current_user: dict = Depends(require_role())):
     db = get_db()
     loop = asyncio.get_running_loop()
+
+    # If student, return only their own assigned team
+    if current_user.get("role") == "student":
+        def _get_student_team():
+            student = db.get_student_by_id(current_user["user_id"])
+            if not student or not student.get("team_id"):
+                return []
+            team = db.get_team_by_id(student["team_id"])
+            if not team:
+                return []
+            members = db.get_team_members(student["team_id"])
+            return [{**team, "members": members}]
+        teams = await loop.run_in_executor(None, _get_student_team)
+        return {"teams": teams}
+
     teams = await loop.run_in_executor(None, lambda: db.get_all_teams(college_id))
     return {"teams": teams}
 
 
-@router.post("/api/teams", dependencies=[Depends(require_role())])
+@router.post("/api/teams", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def create_team(payload: TeamCreate):
     db = get_db()
     loop = asyncio.get_running_loop()
@@ -70,7 +85,7 @@ async def get_team(team_id: str):
     return {**team, "members": members}
 
 
-@router.put("/api/teams/{team_id}", dependencies=[Depends(require_role())])
+@router.put("/api/teams/{team_id}", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def update_team(team_id: str, payload: TeamUpdate):
     db = get_db()
     loop = asyncio.get_running_loop()
@@ -88,7 +103,7 @@ async def update_team(team_id: str, payload: TeamUpdate):
     return updated
 
 
-@router.delete("/api/teams/{team_id}", dependencies=[Depends(require_role())])
+@router.delete("/api/teams/{team_id}", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin"))])
 async def delete_team(team_id: str):
     db = get_db()
     loop = asyncio.get_running_loop()
@@ -106,7 +121,7 @@ async def delete_team(team_id: str):
     return {"detail": "Team deleted"}
 
 
-@router.post("/api/teams/{team_id}/members", dependencies=[Depends(require_role())])
+@router.post("/api/teams/{team_id}/members", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def add_team_member_endpoint(team_id: str, payload: TeamMemberAdd):
     db = get_db()
     loop = asyncio.get_running_loop()
@@ -129,7 +144,7 @@ async def add_team_member_endpoint(team_id: str, payload: TeamMemberAdd):
     return {"members": members}
 
 
-@router.delete("/api/teams/{team_id}/members/{student_id}", dependencies=[Depends(require_role())])
+@router.delete("/api/teams/{team_id}/members/{student_id}", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def remove_team_member_endpoint(team_id: str, student_id: str):
     db = get_db()
     loop = asyncio.get_running_loop()
@@ -153,7 +168,7 @@ async def remove_team_member_endpoint(team_id: str, student_id: str):
 
 
 
-@router.get("/api/teams/students/search", dependencies=[Depends(require_role())])
+@router.get("/api/teams/students/search", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def search_students_for_teams(q: str = ""):
     """Search students by name or enrollment number for team assignment."""
     db = get_db()

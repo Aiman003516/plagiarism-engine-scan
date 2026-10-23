@@ -29,7 +29,19 @@ import { useProjectsCache } from "../lib/useProjectsCache";
 export default function Projects() {
   const { t } = useTranslation();
   const { projects, loading, error, refresh: load } = useProjectsCache();
-  const [activeTab, setActiveTab] = useState<"repository" | "semantic">("repository");
+
+  const user = useMemo<{ id?: string; role?: string } | null>(() => {
+    const userStr = localStorage.getItem("user_data") || localStorage.getItem("user");
+    if (!userStr) return null;
+    try {
+      return JSON.parse(userStr);
+    } catch {
+      return null;
+    }
+  }, []);
+  const isStudent = user?.role === "student";
+
+  const [activeTab, setActiveTab] = useState<"repository" | "semantic">(isStudent ? "semantic" : "repository");
 
   // Repository state
   const [search, setSearch] = useState("");
@@ -51,17 +63,6 @@ export default function Projects() {
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [modelUsed, setModelUsed] = useState("bge-m3");
-
-  const user = useMemo<{ id?: string; role?: string } | null>(() => {
-    const userStr = localStorage.getItem("user_data") || localStorage.getItem("user");
-    if (!userStr) return null;
-    try {
-      return JSON.parse(userStr);
-    } catch {
-      return null;
-    }
-  }, []);
-  const isStudent = user?.role === "student";
 
   const viewFiles = async (project: ProjectSummary | { id: string; title: string; name: string }) => {
     setLoadingFiles(true);

@@ -113,6 +113,24 @@ class SchemaMixin:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_teams_college ON teams(college_id);
+                CREATE TABLE IF NOT EXISTS universities (
+                    id VARCHAR(255) PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL UNIQUE,
+                    code VARCHAR(50),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS colleges (
+                    id VARCHAR(255) PRIMARY KEY,
+                    university_id VARCHAR(255) REFERENCES universities(id) ON DELETE CASCADE,
+                    name VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS departments (
+                    id VARCHAR(255) PRIMARY KEY,
+                    college_id VARCHAR(255) REFERENCES colleges(id) ON DELETE CASCADE,
+                    name VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE TABLE IF NOT EXISTS settings (
                     key VARCHAR(255) PRIMARY KEY,
                     value TEXT
@@ -151,6 +169,20 @@ class SchemaMixin:
                     "CREATE INDEX IF NOT EXISTS idx_projects_team_id ON projects(team_id);",
                     "CREATE INDEX IF NOT EXISTS idx_projects_student_id ON projects(student_id);",
                     "CREATE INDEX IF NOT EXISTS idx_users_college_id ON users(college_id);",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS university_id VARCHAR(255);",
+                    "ALTER TABLE users ADD COLUMN IF NOT EXISTS department_id VARCHAR(255);",
+                    "ALTER TABLE students ADD COLUMN IF NOT EXISTS university_id VARCHAR(255);",
+                    "ALTER TABLE students ADD COLUMN IF NOT EXISTS department_id VARCHAR(255);",
+                    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS university_id VARCHAR(255);",
+                    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS college_id VARCHAR(255);",
+                    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS department_id VARCHAR(255);",
+                    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS abstract_embedding TEXT;",
+                    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS abstract_embedding_binary BIT(1024);",
+                    "CREATE INDEX IF NOT EXISTS idx_colleges_uni ON colleges(university_id);",
+                    "CREATE INDEX IF NOT EXISTS idx_depts_college ON departments(college_id);",
+                    "CREATE INDEX IF NOT EXISTS idx_users_uni ON users(university_id);",
+                    "CREATE INDEX IF NOT EXISTS idx_projects_uni ON projects(university_id);",
+                    "CREATE INDEX IF NOT EXISTS idx_projects_college ON projects(college_id);",
                 ]
                 for stmt in alter_statements:
                     try:
@@ -186,6 +218,7 @@ class SchemaMixin:
                         conn.rollback()
 
                 self._init_default_settings(cur)
+                self._init_default_hierarchy(cur)
                 conn.commit()
 
             else:
@@ -278,6 +311,26 @@ class SchemaMixin:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_teams_college ON teams(college_id);
+                CREATE TABLE IF NOT EXISTS universities (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    code TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS colleges (
+                    id TEXT PRIMARY KEY,
+                    university_id TEXT,
+                    name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (university_id) REFERENCES universities(id)
+                );
+                CREATE TABLE IF NOT EXISTS departments (
+                    id TEXT PRIMARY KEY,
+                    college_id TEXT,
+                    name TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (college_id) REFERENCES colleges(id)
+                );
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
                     value TEXT
@@ -309,6 +362,15 @@ class SchemaMixin:
                     "ALTER TABLE scan_reports ADD COLUMN verdict TEXT;",
                     "CREATE INDEX IF NOT EXISTS idx_pf_embedded ON project_files (file_type, embedding_model);",
                     "CREATE INDEX IF NOT EXISTS idx_fp_composite ON fingerprint_index (fingerprint_hash, file_type, project_id);",
+                    "ALTER TABLE users ADD COLUMN university_id TEXT;",
+                    "ALTER TABLE users ADD COLUMN department_id TEXT;",
+                    "ALTER TABLE students ADD COLUMN university_id TEXT;",
+                    "ALTER TABLE students ADD COLUMN department_id TEXT;",
+                    "ALTER TABLE projects ADD COLUMN university_id TEXT;",
+                    "ALTER TABLE projects ADD COLUMN college_id TEXT;",
+                    "ALTER TABLE projects ADD COLUMN department_id TEXT;",
+                    "ALTER TABLE projects ADD COLUMN abstract_embedding TEXT;",
+                    "ALTER TABLE projects ADD COLUMN abstract_embedding_binary TEXT;",
                 ]
                 for stmt in alter_statements:
                     try:
@@ -317,7 +379,34 @@ class SchemaMixin:
                         pass
 
                 self._init_default_settings(cur)
+                self._init_default_hierarchy(cur)
                 conn.commit()
         finally:
             conn.close()
 
+
+    def _init_default_hierarchy(self, cur):
+        """Seed default university, college, and department if none exist."""
+        try:
+            cur.execute("SELECT COUNT(*) FROM universities;")
+            row = cur.fetchone()
+            count = row[0] if (isinstance(row, tuple) or isinstance(row, list)) else (row.get('count', 0) if isinstance(row, dict) else 0)
+            if count == 0:
+                if self.mode == "postgresql":
+                    cur.execute("""
+                        INSERT INTO universities (id, name, code)
+                        VALUES ('uni_baghdad', 'Baghdad University', 'UOB')
+                        ON CONFLICT (id) DO NOTHING;
+                        INSERT INTO colleges (id, university_id, name)
+                        VALUES ('col_engineering', 'uni_baghdad', 'College of Engineering')
+                        ON CONFLICT (id) DO NOTHING;
+                        INSERT INTO departments (id, college_id, name)
+                        VALUES ('dept_computer', 'col_engineering', 'Computer Engineering')
+                        ON CONFLICT (id) DO NOTHING;
+                    """)
+                else:
+                    cur.execute("INSERT OR IGNORE INTO universities (id, name, code) VALUES ('uni_baghdad', 'Baghdad University', 'UOB');")
+                    cur.execute("INSERT OR IGNORE INTO colleges (id, university_id, name) VALUES ('col_engineering', 'uni_baghdad', 'College of Engineering');")
+                    cur.execute("INSERT OR IGNORE INTO departments (id, college_id, name) VALUES ('dept_computer', 'col_engineering', 'Computer Engineering');")
+        except Exception:
+            pass

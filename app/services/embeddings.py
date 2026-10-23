@@ -39,6 +39,27 @@ def _index_project_embeddings(
         force=force,
     )
 
+    try:
+        p_rec = db_store.get_project_by_id(project_id)
+        if p_rec and p_rec.get("abstract"):
+            import json
+            from plagiarism_engine.vector_store import model_pool, DOMAIN_MODEL_KEYS
+            from plagiarism_engine.vectors.pgvector_store import PgVectorStore
+            from plagiarism_engine.text_detector import normalize_arabic_text
+            model, _ = model_pool.get_model_with_name(DOMAIN_MODEL_KEYS["text"])
+            if model:
+                norm = normalize_arabic_text(p_rec["abstract"][:1500])
+                raw = model.encode(norm, convert_to_numpy=True)
+                pv = PgVectorStore(db_store)
+                emb_1024 = pv._normalize_and_pad_1d(raw, 1024)
+                db_store.update_project(
+                    project_id,
+                    abstract_embedding=json.dumps(emb_1024.tolist()),
+                    abstract_embedding_binary=pv._quantize_to_bit_string(emb_1024)
+                )
+    except Exception as e:
+        print(f"Notice on project abstract embedding indexing: {e}")
+
     msg = (
         f"[Postgres Vector] Project '{project_id}': indexed {added.get('code', 0)} code + "
         f"{added.get('text', 0)} text vectors from {len(files_data)} stored files."

@@ -47,7 +47,7 @@ def _resolve_file_type(relative_path: str) -> str:
     return "code" if ext in CODE_EXTENSIONS else "text"
 
 
-@router.post("/api/plagiarism/deep-scan", dependencies=[Depends(require_role())])
+@router.post("/api/plagiarism/deep-scan", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def deep_scan(req: DeepScanRequest):
     db = get_db()
 
@@ -159,7 +159,7 @@ class BulkDeepScanRequest(BaseModel):
     project_id: str
 
 
-@router.post("/api/plagiarism/deep-scan-bulk", dependencies=[Depends(require_role())])
+@router.post("/api/plagiarism/deep-scan-bulk", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def deep_scan_bulk(req: BulkDeepScanRequest):
     """Postgres 2-Step Rescoring bulk semantic scan: top-5 cross-project matches for every file of a project."""
     project_id = (req.project_id or "").strip()

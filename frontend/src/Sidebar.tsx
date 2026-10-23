@@ -37,14 +37,21 @@ function useDarkMode() {
   return [isDark, () => setIsDark((d) => !d)] as const;
 }
 
-const navItems = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/", label: "Project Intake", icon: UploadCloud },
-  { to: "/scan", label: "Plagiarism Scanner", icon: Search },
-  { to: "/projects", label: "Projects", icon: FolderOpen },
-  { to: "/teams", label: "Team Management", icon: Users },
-  { to: "/users", label: "User Management", icon: UserCog },
-  { to: "/settings", label: "Settings", icon: Settings },
+interface NavItem {
+  to: string;
+  label: string;
+  icon: any;
+  allowedRoles: string[];
+}
+
+const navItems: NavItem[] = [
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty"] },
+  { to: "/", label: "Project Intake", icon: UploadCloud, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty"] },
+  { to: "/scan", label: "Plagiarism Scanner", icon: Search, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty"] },
+  { to: "/projects", label: "Projects & AI Search", icon: FolderOpen, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty", "student"] },
+  { to: "/teams", label: "Team Management", icon: Users, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty", "student"] },
+  { to: "/users", label: "User Management", icon: UserCog, allowedRoles: ["ministry_admin", "university_admin", "college_admin"] },
+  { to: "/settings", label: "Settings", icon: Settings, allowedRoles: ["ministry_admin", "university_admin"] },
 ];
 
 import { useScanStore } from "./lib/scanStore";
@@ -75,7 +82,10 @@ function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 px-2 md:px-3 space-y-1">
-        {navItems.map(({ to, label, icon: Icon }) => {
+        {navItems
+          .filter((item) => item.allowedRoles.includes(user?.role || "student"))
+          .map(({ to, label, icon: Icon }) => {
+            const displayLabel = (to === "/teams" && user?.role === "student") ? "My Team" : label;
           const isActive = location.pathname === to;
           return (
             <Link
@@ -89,7 +99,7 @@ function Sidebar() {
               aria-current={isActive ? "page" : undefined}
             >
               <Icon className="w-5 h-5 flex-shrink-0" />
-              <span className="hidden md:inline">{label}</span>
+              <span className="hidden md:inline">{displayLabel}</span>
               {isScanning && ((to === "/" && scanSource === "intake") || (to === "/scan" && scanSource === "scanner")) && (
                 <span className="ml-auto hidden md:flex h-2 w-2 relative" title="Scan actively processing">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>

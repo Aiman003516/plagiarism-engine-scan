@@ -26,7 +26,7 @@ async def health_check():
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
 
-@router.get("/api/dashboard/stats", dependencies=[Depends(require_role())])
+@router.get("/api/dashboard/stats", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def dashboard_stats():
     db = get_db()
     loop = asyncio.get_running_loop()

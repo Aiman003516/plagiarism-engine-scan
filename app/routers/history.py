@@ -45,14 +45,14 @@ def _find_history_report(report_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-@router.get("/api/plagiarism/history", dependencies=[Depends(require_role())])
+@router.get("/api/plagiarism/history", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def get_scan_history():
     """Return every stored scan report as a lightweight summary list."""
     history = _load_history()
     return {"reports": [_history_summary(entry) for entry in history]}
 
 
-@router.get("/api/plagiarism/history/{report_id}", dependencies=[Depends(require_role())])
+@router.get("/api/plagiarism/history/{report_id}", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def get_scan_history_detail(report_id: str):
     """Return one full scan report (comparisons, stats, languages, git metadata)."""
     entry = _find_history_report(report_id)
@@ -80,7 +80,7 @@ async def get_scan_history_detail(report_id: str):
     return report
 
 
-@router.delete("/api/plagiarism/history/{report_id}", dependencies=[Depends(require_role())])
+@router.delete("/api/plagiarism/history/{report_id}", dependencies=[Depends(require_role("ministry_admin"))])
 async def delete_scan_history_report(report_id: str):
     """Delete a single stored scan report."""
     history = _load_history()

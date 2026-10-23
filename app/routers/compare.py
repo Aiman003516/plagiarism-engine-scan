@@ -87,7 +87,7 @@ def _run_project_comparison(project_a: str, project_b: str) -> List[Dict[str, An
     return comparisons
 
 
-@router.post("/api/plagiarism/compare-projects", dependencies=[Depends(require_role())])
+@router.post("/api/plagiarism/compare-projects", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def compare_projects(req: ProjectComparisonRequest):
     """Direct project-to-project comparison: overlap matrix of matching files."""
     project_a = (req.project_a or "").strip()
@@ -160,7 +160,7 @@ def _resolve_stored_file(project_id: str, relative_path: str) -> Optional[str]:
     return None
 
 
-@router.post("/api/plagiarism/compare-files", dependencies=[Depends(require_role())])
+@router.post("/api/plagiarism/compare-files", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def compare_files_endpoint(req: CompareFilesRequest):
     """Line-level diff of two stored files, used by the visual Diff Viewer.
 
@@ -221,7 +221,7 @@ async def compare_files_endpoint(req: CompareFilesRequest):
     }
 
 
-@router.post("/api/plagiarism/compare-direct-files", dependencies=[Depends(require_role())])
+@router.post("/api/plagiarism/compare-direct-files", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def compare_direct_files(
     file_a: Optional[UploadFile] = File(None),
     file_b: Optional[UploadFile] = File(None),

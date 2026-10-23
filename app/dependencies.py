@@ -89,6 +89,10 @@ def _create_access_token(user_id: str, email: str, role: str, requires_password_
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
+VALID_ROLES = {"ministry_admin", "university_admin", "college_admin", "faculty", "student"}
+STAFF_ROLES = {"ministry_admin", "university_admin", "college_admin", "faculty"}
+ADMIN_ROLES = {"ministry_admin", "university_admin", "college_admin"}
+
 def require_role(*allowed_roles: str):
     """
     FastAPI dependency enforcing JWT + role-based access control.
@@ -96,7 +100,10 @@ def require_role(*allowed_roles: str):
     Reads the 'Authorization: Bearer <token>' header, decodes the JWT, and
     extracts user_id / role. Raises 401 on invalid credentials and 403 when
     the authenticated role is not permitted.
+    If no roles are passed, defaults to allowing any valid authenticated role.
     """
+    effective_roles = set(allowed_roles) if allowed_roles else VALID_ROLES
+
     def _enforce(credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme)):
         try:
             payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
@@ -110,8 +117,8 @@ def require_role(*allowed_roles: str):
         if not user_id or not role:
             raise HTTPException(status_code=401, detail="Invalid token payload")
 
-        if allowed_roles and role not in allowed_roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        if role not in effective_roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions for this operation.")
 
         return {
             "user_id": user_id,

@@ -45,9 +45,9 @@ class UsersStoreMixin:
             cur = conn.cursor()
             uemail = clean_str(email).lower()
             if self.mode == "postgresql":
-                cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change FROM users WHERE email = %s;", (uemail,))
+                cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change, university_id, department_id FROM users WHERE email = %s;", (uemail,))
             else:
-                cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change FROM users WHERE email = ?;", (uemail,))
+                cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change, university_id, department_id FROM users WHERE email = ?;", (uemail,))
             row = cur.fetchone()
             if not row:
                 return None
@@ -57,6 +57,8 @@ class UsersStoreMixin:
                 "id": row[0], "name": row[1], "email": row[2], "password_hash": row[3],
                 "role": row[4], "college_id": row[5], "created_at": row[6],
                 "requires_password_change": row[7],
+                "university_id": row[8] if len(row) > 8 else None,
+                "department_id": row[9] if len(row) > 9 else None,
             }
         finally:
             conn.close()
@@ -112,9 +114,9 @@ class UsersStoreMixin:
             cur = conn.cursor()
             uid = clean_str(id)
             if self.mode == "postgresql":
-                cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change FROM users WHERE id = %s;", (uid,))
+                cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change, university_id, department_id FROM users WHERE id = %s;", (uid,))
             else:
-                cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change FROM users WHERE id = ?;", (uid,))
+                cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change, university_id, department_id FROM users WHERE id = ?;", (uid,))
             row = cur.fetchone()
             if not row:
                 return None
@@ -124,6 +126,8 @@ class UsersStoreMixin:
                 "id": row[0], "name": row[1], "email": row[2], "password_hash": row[3],
                 "role": row[4], "college_id": row[5], "created_at": row[6],
                 "requires_password_change": row[7],
+                "university_id": row[8] if len(row) > 8 else None,
+                "department_id": row[9] if len(row) > 9 else None,
             }
         finally:
             conn.close()
@@ -136,11 +140,11 @@ class UsersStoreMixin:
             if role_filter:
                 rrole = clean_str(role_filter)
                 if self.mode == "postgresql":
-                    cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change FROM users WHERE role = %s ORDER BY created_at DESC;", (rrole,))
+                    cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change, university_id, department_id FROM users WHERE role = %s ORDER BY created_at DESC;", (rrole,))
                 else:
-                    cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change FROM users WHERE role = ? ORDER BY created_at DESC;", (rrole,))
+                    cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change, university_id, department_id FROM users WHERE role = ? ORDER BY created_at DESC;", (rrole,))
             else:
-                cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change FROM users ORDER BY created_at DESC;")
+                cur.execute("SELECT id, name, email, password_hash, role, college_id, created_at, requires_password_change, university_id, department_id FROM users ORDER BY created_at DESC;")
             rows = cur.fetchall()
 
             users = []
@@ -152,6 +156,8 @@ class UsersStoreMixin:
                         "id": r[0], "name": r[1], "email": r[2], "password_hash": r[3],
                         "role": r[4], "college_id": r[5], "created_at": r[6],
                         "requires_password_change": r[7],
+                        "university_id": r[8] if len(r) > 8 else None,
+                        "department_id": r[9] if len(r) > 9 else None,
                     })
             return users
         finally:
@@ -162,7 +168,7 @@ class UsersStoreMixin:
         conn = self._get_connection()
         try:
             cur = conn.cursor()
-            allowed = {"name", "email", "password_hash", "role", "college_id", "requires_password_change"}
+            allowed = {"name", "email", "password_hash", "role", "college_id", "requires_password_change", "university_id", "department_id"}
             updates = {}
             for key, value in fields.items():
                 if key in allowed and value is not None:
