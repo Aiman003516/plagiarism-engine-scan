@@ -1,4 +1,4 @@
-"""Aggregate counts for the dashboard."""
+﻿"""Aggregate counts for the dashboard."""
 
 
 from .helpers import row_get

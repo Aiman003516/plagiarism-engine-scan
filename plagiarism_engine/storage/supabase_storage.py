@@ -1,4 +1,4 @@
-import os
+﻿import os
 from typing import List, Any
 try:
     from supabase import create_client, Client

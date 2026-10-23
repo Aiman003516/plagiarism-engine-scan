@@ -36,6 +36,11 @@ class GitScanRequest(BaseModel):
     access_token: Optional[str] = None
     project_name: Optional[str] = None
     scan_type: Optional[str] = "Git Repository Scan"
+    title: Optional[str] = None
+    abstract: Optional[str] = None
+    department: Optional[str] = None
+    year: Optional[int] = None
+    university: Optional[str] = None
 
 @router.get("/api/plagiarism/scan-stream/{project_id}")
 async def reconnect_scan_stream(
@@ -316,8 +321,14 @@ async def git_scan(payload: GitScanRequest):
 @router.post("/api/plagiarism/git-scan-stream", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def git_scan_stream(payload: GitScanRequest):
     # Resolve the project id up-front so the resumable session can be keyed by it
-    # (the worker below previously derived it only after cloning).
-    project_name = payload.project_name or Path(payload.repo_url.rstrip("/")).stem
+    # Prevent browser-autofill emails from being mistakenly used as project names
+    raw_name = (payload.project_name or "").strip()
+    clean_stem = Path(payload.repo_url.rstrip("/")).stem.replace(".git", "")
+    if not raw_name or "@" in raw_name:
+        project_name = clean_stem
+    else:
+        project_name = raw_name
+
     session = _start_scan_session(project_name)
 
     async def event_stream():
@@ -340,10 +351,19 @@ async def git_scan_stream(payload: GitScanRequest):
                     if "relative_path" not in f:
                         f["relative_path"] = f.get("filename", "")
 
+                metadata = {
+                    "title": payload.title or project_name,
+                    "abstract": payload.abstract,
+                    "department": payload.department,
+                    "year": payload.year,
+                    "university": payload.university,
+                }
+
                 res = _run_intake(
                     project_name, extracted_files,
                     log_callback=log_callback,
                     git_metadata=git_metadata,
+                    metadata=metadata,
                 )
                 session.publish({"type": "complete", "result": res})
             except Exception as e:

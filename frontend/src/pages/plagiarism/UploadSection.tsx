@@ -36,11 +36,25 @@ export function UploadSection() {
   const isIntakeScanning = isScanning && (scanSource === "intake" || !scanSource);
   const bloatFilteredCount = useScanStore((s) => s.bloatFilteredCount);
 
-  // Project Academic Metadata State
+  // Project Academic Metadata State (Pre-populated from user profile)
   const [metaTitle, setMetaTitle] = useState("");
-  const [metaDepartment, setMetaDepartment] = useState("");
+  const [metaDepartment, setMetaDepartment] = useState(() => {
+    try {
+      const u = JSON.parse(localStorage.getItem("user_data") || "{}");
+      return u.department_name || u.department_id || "Computer Engineering";
+    } catch {
+      return "Computer Engineering";
+    }
+  });
   const [metaYear, setMetaYear] = useState<string>(new Date().getFullYear().toString());
-  const [metaUniversity, setMetaUniversity] = useState("");
+  const [metaUniversity, setMetaUniversity] = useState(() => {
+    try {
+      const u = JSON.parse(localStorage.getItem("user_data") || "{}");
+      return u.university_name || "Baghdad University";
+    } catch {
+      return "Baghdad University";
+    }
+  });
   const [metaAbstract, setMetaAbstract] = useState("");
   const [showMetadata, setShowMetadata] = useState(false);
 
@@ -427,6 +441,8 @@ export function UploadSection() {
               <div className="w-full max-w-sm mb-4" onClick={(e) => e.stopPropagation()}>
                 <input
                   type="text"
+                  autoComplete="off"
+                  name="project_upload_name_no_autofill"
                   placeholder="Project Name (e.g., Spring2026_Final)"
                   className="w-full bg-surface border border-glass-border rounded-xl px-4 py-2.5 text-sm text-text-main focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all placeholder:text-text-muted/50"
                   value={projectName}

@@ -1,4 +1,4 @@
-"""Scan history endpoints (list / detail / delete)."""
+﻿"""Scan history endpoints (list / detail / delete)."""
 
 from typing import Dict, Any, Optional
 from fastapi import HTTPException, Depends

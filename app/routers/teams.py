@@ -26,6 +26,10 @@ class TeamUpdate(BaseModel):
     name: str
 
 
+class ToggleSubmissionPayload(BaseModel):
+    allowed: Optional[bool] = None
+
+
 class TeamMemberAdd(BaseModel):
     enrollment_number: str
 
@@ -98,6 +102,30 @@ async def update_team(team_id: str, payload: TeamUpdate):
         return db.get_team_by_id(team_id)
 
     updated = await loop.run_in_executor(None, _update)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Team not found")
+    return updated
+
+
+@router.post("/api/teams/{team_id}/toggle-submission", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
+async def toggle_team_submission(team_id: str, payload: ToggleSubmissionPayload = None):
+    """
+    Allow faculty supervisors / admins to grant or revoke a one-time proposal
+    submission token for a student team.
+    """
+    db = get_db()
+    loop = asyncio.get_running_loop()
+
+    def _toggle():
+        existing = db.get_team_by_id(team_id)
+        if not existing:
+            return None
+        current_state = bool(existing.get("submission_allowed", False))
+        new_state = (not current_state) if (payload is None or payload.allowed is None) else bool(payload.allowed)
+        db.update_team(team_id, submission_allowed=new_state)
+        return db.get_team_by_id(team_id)
+
+    updated = await loop.run_in_executor(None, _toggle)
     if not updated:
         raise HTTPException(status_code=404, detail="Team not found")
     return updated

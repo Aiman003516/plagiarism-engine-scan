@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ErrorBoundary — catches render-time crashes (including React.lazy chunk
  * load failures after a redeploy) and shows a fallback card instead of
  * white-screening the whole app.

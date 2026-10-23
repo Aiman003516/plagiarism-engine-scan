@@ -1,4 +1,4 @@
-"""System settings endpoints."""
+﻿"""System settings endpoints."""
 
 from typing import Dict, Any
 from fastapi import Depends

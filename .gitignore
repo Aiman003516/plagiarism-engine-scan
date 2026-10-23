@@ -93,4 +93,5 @@ server_out.log
 bench_faiss_before.py
 verify_upload_perf.py
 scratch/
+*.pdf
 

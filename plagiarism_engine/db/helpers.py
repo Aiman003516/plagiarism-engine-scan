@@ -1,4 +1,4 @@
-"""Shared DB helpers: driver detection, string sanitising, compression, row access."""
+﻿"""Shared DB helpers: driver detection, string sanitising, compression, row access."""
 
 import zlib
 import base64

@@ -34,6 +34,43 @@ class ChangePasswordRequest(BaseModel):
     old_password: str
     new_password: str
 
+def _enrich_user_institutions(db, user: dict) -> dict:
+    """Enrich user or student dict with institutional human-readable names."""
+    enriched = dict(user)
+    conn = db._get_connection()
+    try:
+        cur = conn.cursor()
+        uni_id = enriched.get("university_id")
+        col_id = enriched.get("college_id")
+        dept_id = enriched.get("department_id")
+
+        if uni_id:
+            cur.execute("SELECT name FROM universities WHERE id = %s;", (uni_id,))
+            r = cur.fetchone()
+            enriched["university_name"] = r[0] if r else None
+        else:
+            enriched["university_name"] = None
+
+        if col_id:
+            cur.execute("SELECT name FROM colleges WHERE id = %s;", (col_id,))
+            r = cur.fetchone()
+            enriched["college_name"] = r[0] if r else None
+        else:
+            enriched["college_name"] = None
+
+        if dept_id:
+            cur.execute("SELECT name FROM departments WHERE id = %s;", (dept_id,))
+            r = cur.fetchone()
+            enriched["department_name"] = r[0] if r else None
+        else:
+            enriched["department_name"] = None
+    except Exception:
+        pass
+    finally:
+        conn.close()
+    return enriched
+
+
 @router.post("/api/auth/login")
 async def login(payload: LoginRequest):
     db = get_db()
@@ -66,15 +103,24 @@ async def login(payload: LoginRequest):
 
     token = _create_access_token(user["id"], user["email"], user["role"], requires_password_change)
 
+    enriched = _enrich_user_institutions(db, user)
+
     response_user = {
         "id": user["id"],
         "name": user["name"],
         "email": user["email"],
         "role": user["role"],
+        "university_id": enriched.get("university_id"),
+        "university_name": enriched.get("university_name"),
+        "college_id": enriched.get("college_id"),
+        "college_name": enriched.get("college_name"),
+        "department_id": enriched.get("department_id"),
+        "department_name": enriched.get("department_name"),
         "requires_password_change": requires_password_change,
     }
     if is_student:
         response_user["enrollment_number"] = user.get("enrollment_number")
+        response_user["team_id"] = user.get("team_id")
 
     return {"token": token, "user": response_user}
 
@@ -84,12 +130,18 @@ async def auth_me(current_user: dict = Depends(require_role())):
     db = get_db()
     user = db.get_user_by_id(current_user["user_id"])
     if user:
+        enriched = _enrich_user_institutions(db, user)
         return {
             "id": user["id"],
             "name": user["name"],
             "email": user["email"],
             "role": user["role"],
-            "college_id": user.get("college_id"),
+            "university_id": enriched.get("university_id"),
+            "university_name": enriched.get("university_name"),
+            "college_id": enriched.get("college_id"),
+            "college_name": enriched.get("college_name"),
+            "department_id": enriched.get("department_id"),
+            "department_name": enriched.get("department_name"),
             "requires_password_change": bool(user.get("requires_password_change")),
             "created_at": user.get("created_at"),
         }
@@ -98,13 +150,20 @@ async def auth_me(current_user: dict = Depends(require_role())):
     student = db.get_student_by_id(current_user["user_id"])
     if not student:
         raise HTTPException(status_code=404, detail="User not found")
+
+    enriched = _enrich_user_institutions(db, student)
     return {
         "id": student["id"],
         "name": student["name"],
         "email": student.get("enrollment_number"),
         "enrollment_number": student.get("enrollment_number"),
         "role": "student",
-        "college_id": student.get("college_id"),
+        "university_id": enriched.get("university_id"),
+        "university_name": enriched.get("university_name"),
+        "college_id": enriched.get("college_id"),
+        "college_name": enriched.get("college_name"),
+        "department_id": enriched.get("department_id"),
+        "department_name": enriched.get("department_name"),
         "team_id": student.get("team_id"),
         "requires_password_change": bool(student.get("requires_password_change")),
         "created_at": student.get("created_at"),

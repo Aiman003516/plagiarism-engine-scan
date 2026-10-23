@@ -1,4 +1,4 @@
-/**
+﻿/**
  * DiffViewer — side-by-side visual diff of two stored project files.
  *
  * Loads the line-level diff from `POST /api/plagiarism/compare-files` (raw

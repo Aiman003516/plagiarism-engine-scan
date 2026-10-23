@@ -1,4 +1,4 @@
-"""User accounts (JWT/RBAC) and student accounts."""
+﻿"""User accounts (JWT/RBAC) and student accounts."""
 
 from typing import List, Dict, Any, Optional
 

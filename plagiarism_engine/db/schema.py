@@ -1,4 +1,4 @@
-"""Schema creation / migration for all tables."""
+﻿"""Schema creation / migration for all tables."""
 
 
 

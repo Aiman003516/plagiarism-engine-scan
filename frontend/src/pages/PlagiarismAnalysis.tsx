@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Database, Search, RefreshCw, AlertTriangle, ShieldCheck, GitCompare, Eye, X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
@@ -69,6 +69,8 @@ export function PlagiarismAnalysis() {
   const [directResult, setDirectResult] = useState<DirectCompareFilesResult | null>(null);
   const [directError, setDirectError] = useState<string | null>(null);
   const [showDirectDiffModal, setShowDirectDiffModal] = useState(false);
+  const [isDraggingA, setIsDraggingA] = useState(false);
+  const [isDraggingB, setIsDraggingB] = useState(false);
 
   const [selectedProject, setSelectedProject] = useState<string>(() => activeProjectId || '');
   const [deepScanResult, setDeepScanResult] = useState<DeepScanResult | null>(null);
@@ -370,7 +372,25 @@ export function PlagiarismAnalysis() {
             </div>
 
             {modeA === 'upload' ? (
-              <div className="border-2 border-dashed border-border dark:border-slate-700 rounded-xl p-4 flex-1 flex flex-col items-center justify-center text-center hover:border-primary/50 transition-colors bg-surface/20 min-h-[140px]">
+              <div
+                onDragOver={(e) => { e.preventDefault(); setIsDraggingA(true); }}
+                onDragLeave={(e) => { e.preventDefault(); setIsDraggingA(false); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDraggingA(false);
+                  const dropped = e.dataTransfer.files?.[0];
+                  if (dropped) {
+                    setFileA(dropped);
+                    setDirectResult(null);
+                    setDirectError(null);
+                  }
+                }}
+                className={`border-2 border-dashed rounded-xl p-4 flex-1 flex flex-col items-center justify-center text-center transition-all min-h-[140px] ${
+                  isDraggingA
+                    ? 'border-primary bg-primary/10 ring-2 ring-primary/30 scale-[1.01]'
+                    : 'border-border dark:border-slate-700 hover:border-primary/50 bg-surface/20'
+                }`}
+              >
                 <input
                   type="file"
                   id="direct-file-a"
@@ -462,7 +482,25 @@ export function PlagiarismAnalysis() {
             </div>
 
             {modeB === 'upload' ? (
-              <div className="border-2 border-dashed border-border dark:border-slate-700 rounded-xl p-4 flex-1 flex flex-col items-center justify-center text-center hover:border-primary/50 transition-colors bg-surface/20 min-h-[140px]">
+              <div
+                onDragOver={(e) => { e.preventDefault(); setIsDraggingB(true); }}
+                onDragLeave={(e) => { e.preventDefault(); setIsDraggingB(false); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDraggingB(false);
+                  const dropped = e.dataTransfer.files?.[0];
+                  if (dropped) {
+                    setFileB(dropped);
+                    setDirectResult(null);
+                    setDirectError(null);
+                  }
+                }}
+                className={`border-2 border-dashed rounded-xl p-4 flex-1 flex flex-col items-center justify-center text-center transition-all min-h-[140px] ${
+                  isDraggingB
+                    ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500/30 scale-[1.01]'
+                    : 'border-border dark:border-slate-700 hover:border-emerald-500/50 bg-surface/20'
+                }`}
+              >
                 <input
                   type="file"
                   id="direct-file-b"

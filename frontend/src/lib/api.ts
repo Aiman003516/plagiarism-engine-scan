@@ -246,6 +246,11 @@ export interface GitRepoScanPayload {
   access_token?: string;
   project_name?: string;
   scan_type?: string;
+  title?: string;
+  abstract?: string;
+  department?: string;
+  year?: number;
+  university?: string;
 }
 
 export interface ProjectSummary {
@@ -257,8 +262,10 @@ export interface ProjectSummary {
   department?: string | null;
   year?: number | null;
   university?: string | null;
-  status?: 'pending' | 'approved' | 'rejected';
+  status?: 'pending' | 'approved' | 'rejected' | 'pending_review';
   student_id?: string;
+  review_notes?: string | null;
+  submitted_by_student_id?: string | null;
   created_at?: string;
 }
 
@@ -390,6 +397,27 @@ export const plagiarismApi = {
   approveProject: (id: string) =>
     apiFetch<{ detail: string }>(`/api/plagiarism/projects/${id}/approve`, {
       method: "POST",
+    }),
+
+  studentSubmitProposal: (payload: {
+    title: string;
+    abstract: string;
+    department?: string;
+    year?: number;
+    university?: string;
+  }) =>
+    apiFetch<ProjectSummary>("/api/plagiarism/projects/student-submit", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  reviewProject: (
+    projectId: string,
+    payload: { action: "approve" | "reject"; notes?: string; reopen_submission?: boolean }
+  ) =>
+    apiFetch<ProjectSummary>(`/api/plagiarism/projects/${encodeURIComponent(projectId)}/review`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
 
   getProjectFiles: (id: string) =>
@@ -981,6 +1009,7 @@ export interface TeamData {
   id: string;
   name: string;
   college_id?: string | null;
+  submission_allowed?: boolean;
   created_at?: string;
   members?: TeamMemberData[];
 }
@@ -1033,6 +1062,12 @@ export const teamsApi = {
   removeMember: (teamId: string, studentId: string) =>
     apiFetch<{ detail: string }>(`/api/teams/${teamId}/members/${studentId}`, {
       method: "DELETE",
+    }),
+
+  toggleSubmission: (teamId: string, allowed?: boolean) =>
+    apiFetch<TeamData>(`/api/teams/${encodeURIComponent(teamId)}/toggle-submission`, {
+      method: "POST",
+      body: JSON.stringify({ allowed }),
     }),
 };
 

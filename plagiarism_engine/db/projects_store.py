@@ -123,13 +123,13 @@ class ProjectsStoreMixin:
 
             if self.mode == "postgresql":
                 cur.execute(
-                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id "
+                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id, review_notes, submitted_by_student_id "
                     "FROM projects ORDER BY created_at DESC LIMIT %s OFFSET %s;",
                     (limit, offset),
                 )
             else:
                 cur.execute(
-                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id "
+                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id, review_notes, submitted_by_student_id "
                     "FROM projects ORDER BY created_at DESC LIMIT ? OFFSET ?;",
                     (limit, offset),
                 )
@@ -146,6 +146,8 @@ class ProjectsStoreMixin:
                         "team_id": r[4], "department": r[5], "year": r[6],
                         "university": r[7], "status": r[8], "created_at": r[9],
                         "student_id": r[10],
+                        "review_notes": r[11] if len(r) > 11 else None,
+                        "submitted_by_student_id": r[12] if len(r) > 12 else None,
                     })
             return projects
         finally:
@@ -178,13 +180,13 @@ class ProjectsStoreMixin:
             pid = clean_str(project_id)
             if self.mode == "postgresql":
                 cur.execute(
-                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at "
+                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id, review_notes, submitted_by_student_id "
                     "FROM projects WHERE id = %s;",
                     (pid,),
                 )
             else:
                 cur.execute(
-                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at "
+                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id, review_notes, submitted_by_student_id "
                     "FROM projects WHERE id = ?;",
                     (pid,),
                 )
@@ -197,6 +199,9 @@ class ProjectsStoreMixin:
                 "id": row[0], "name": row[1], "title": row[2], "abstract": row[3],
                 "team_id": row[4], "department": row[5], "year": row[6],
                 "university": row[7], "status": row[8], "created_at": row[9],
+                "student_id": row[10] if len(row) > 10 else None,
+                "review_notes": row[11] if len(row) > 11 else None,
+                "submitted_by_student_id": row[12] if len(row) > 12 else None,
             }
         finally:
             conn.close()
@@ -208,7 +213,8 @@ class ProjectsStoreMixin:
             cur = conn.cursor()
             allowed = {
                 "name", "title", "abstract", "team_id", "department", "year", "university", "status",
-                "university_id", "college_id", "department_id", "abstract_embedding", "abstract_embedding_binary"
+                "university_id", "college_id", "department_id", "student_id", "submitted_by_student_id",
+                "review_notes", "abstract_embedding", "abstract_embedding_binary"
             }
             updates = {}
             for key, value in fields.items():

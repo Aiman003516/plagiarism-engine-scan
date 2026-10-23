@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { BrainCircuit, X } from 'lucide-react';
 import type { DeepScanResult } from '../../lib/api';
 

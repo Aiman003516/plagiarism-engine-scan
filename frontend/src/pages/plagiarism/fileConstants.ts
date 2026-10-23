@@ -1,4 +1,4 @@
-export const CODE_EXTS = new Set([
+﻿export const CODE_EXTS = new Set([
   "py", "js", "jsx", "ts", "tsx", "mjs", "cjs", "java", "c", "cpp", "cc", "cxx", "h", "hpp", "cs",
   "go", "rs", "php", "rb", "swift", "kt", "kts", "scala", "html", "htm", "css", "scss", "sass", "less",
   "sql", "sh", "bash", "zsh", "pl", "lua", "dart", "r", "m", "vue", "svelte"

@@ -1,4 +1,4 @@
-"""Users CRUD endpoints."""
+﻿"""Users CRUD endpoints."""
 
 import asyncio
 import uuid

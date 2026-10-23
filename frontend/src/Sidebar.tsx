@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Sidebar — responsive navigation rail for the authenticated app shell.
  * Rendered only from <AppLayout />, so public auth pages (/login, /register)
  * never show application chrome.

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Users, RefreshCw, Search, Trash2, Plus, X, Loader2, UserPlus, GraduationCap, CheckCircle2 } from "lucide-react";
+import { Users, RefreshCw, Search, Trash2, Plus, X, Loader2, UserPlus, GraduationCap, CheckCircle2, KeyRound, Unlock, Lock } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { teamsApi, TeamData } from "../lib/api";
@@ -125,6 +125,27 @@ export default function Teams() {
     }
   };
 
+  const toggleSubmission = async (team: TeamData) => {
+    try {
+      const updated = await teamsApi.toggleSubmission(team.id, !team.submission_allowed);
+      toast.success(
+        updated.submission_allowed
+          ? `One-time proposal submission granted to ${team.name}`
+          : `Submission token revoked for ${team.name}`
+      );
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to update submission permission");
+    }
+  };
+
+  const userStr = localStorage.getItem("user_data") || localStorage.getItem("user");
+  let userRole = "";
+  try {
+    userRole = JSON.parse(userStr || "{}").role || "";
+  } catch {}
+  const canManageSubmissions = ["faculty", "college_admin", "university_admin", "ministry_admin"].includes(userRole);
+
   const filtered = teams.filter(
     (team) =>
       !search.trim() ||
@@ -186,17 +207,48 @@ export default function Teams() {
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => deleteTeam(team)}
-                  className="btn-danger-icon"
-                  title={t("delete")}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {canManageSubmissions && (
+                  <button
+                    onClick={() => deleteTeam(team)}
+                    className="btn-danger-icon"
+                    title={t("delete")}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
               </div>
+
+              {/* One-Time Submission Permission Status */}
+              <div className="mt-3 pt-3 border-t border-glass-border flex items-center justify-between text-xs">
+                <span className="text-text-muted text-[11px]">Proposal Submission:</span>
+                {team.submission_allowed ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                    <Unlock className="w-3 h-3" /> Token Active
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-surface text-text-muted border border-glass-border">
+                    <Lock className="w-3 h-3 text-amber-500" /> Locked
+                  </span>
+                )}
+              </div>
+
+              {canManageSubmissions && (
+                <button
+                  onClick={() => toggleSubmission(team)}
+                  className={`mt-2.5 w-full py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                    team.submission_allowed
+                      ? "bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-500/25"
+                      : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25"
+                  }`}
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  {team.submission_allowed ? "Revoke Proposal Token" : "Grant 1-Time Proposal Submission"}
+                </button>
+              )}
+
               <button
                 onClick={() => openTeam(team)}
-                className="btn-secondary mt-4 w-full py-2 text-sm"
+                className="btn-secondary mt-2.5 w-full py-2 text-sm"
               >
                 {t("members")}
               </button>

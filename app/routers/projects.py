@@ -119,6 +119,147 @@ async def approve_project(project_id: str):
     return {"detail": "Project approved successfully"}
 
 
+class StudentSubmitRequest(BaseModel):
+    title: str
+    abstract: str
+    department: Optional[str] = None
+    year: Optional[int] = None
+    university: Optional[str] = None
+
+
+class ProjectReviewRequest(BaseModel):
+    action: str  # 'approve' | 'reject'
+    notes: Optional[str] = None
+    reopen_submission: Optional[bool] = False
+
+
+@router.post("/api/plagiarism/projects/student-submit", dependencies=[Depends(require_role("student"))])
+async def student_submit_proposal(payload: StudentSubmitRequest, current_user: dict = Depends(require_role("student"))):
+    """
+    Allow a student to submit their graduation proposal if their assigned team
+    has been granted a one-time submission token by their academic supervisor.
+    """
+    db = get_db()
+    loop = asyncio.get_running_loop()
+    student_id = current_user.get("user_id")
+
+    def _submit():
+        student = db.get_student_by_id(student_id)
+        if not student:
+            raise HTTPException(status_code=404, detail="Student profile not found.")
+
+        team_id = student.get("team_id")
+        if not team_id:
+            raise HTTPException(
+                status_code=400,
+                detail="You must be a member of a team to submit a proposal. Please join or create a team first."
+            )
+
+        team = db.get_team_by_id(team_id)
+        if not team or not team.get("submission_allowed"):
+            raise HTTPException(
+                status_code=403,
+                detail="Proposal submission is locked for your team. Please request submission authorization from your faculty supervisor / department head."
+            )
+
+        title = payload.title.strip()
+        abstract = payload.abstract.strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="Project title is required.")
+        if not abstract:
+            raise HTTPException(status_code=400, detail="Proposal abstract / problem statement is required.")
+
+        import uuid
+        from datetime import datetime
+        project_id = str(uuid.uuid4())
+
+        # 1. Store base project
+        db.save_project(project_id, title, [])
+
+        # 2. Update with academic metadata and student attribution
+        dept = payload.department or student.get("department_id") or "Computer Engineering"
+        yr = payload.year or datetime.now().year
+        uni = payload.university or "Baghdad University"
+
+        fields = {
+            "title": title,
+            "abstract": abstract,
+            "team_id": team_id,
+            "department": dept,
+            "year": yr,
+            "university": uni,
+            "status": "pending_review",
+            "student_id": student_id,
+            "submitted_by_student_id": student_id,
+            "university_id": student.get("university_id"),
+            "college_id": student.get("college_id"),
+            "department_id": student.get("department_id"),
+        }
+
+        # 3. Generate immediate abstract embedding for search
+        try:
+            import json
+            from plagiarism_engine.vector_store import model_pool, DOMAIN_MODEL_KEYS
+            from plagiarism_engine.vectors.pgvector_store import PgVectorStore
+            from plagiarism_engine.text_detector import normalize_arabic_text
+            model, _ = model_pool.get_model_with_name(DOMAIN_MODEL_KEYS["text"])
+            if model:
+                norm = normalize_arabic_text(abstract[:1500])
+                raw = model.encode(norm, convert_to_numpy=True)
+                pv = PgVectorStore(db)
+                emb_1024 = pv._normalize_and_pad_1d(raw, 1024)
+                fields["abstract_embedding"] = json.dumps(emb_1024.tolist())
+                fields["abstract_embedding_binary"] = pv._quantize_to_bit_string(emb_1024)
+        except Exception as e:
+            print("Warning generating abstract embedding for student submission:", e)
+
+        db.update_project(project_id, **fields)
+
+        # 4. Consume the one-time submission token
+        db.update_team(team_id, submission_allowed=False)
+
+        return db.get_project_by_id(project_id)
+
+    return await loop.run_in_executor(None, _submit)
+
+
+@router.post("/api/plagiarism/projects/{project_id}/review", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
+async def review_project(project_id: str, payload: ProjectReviewRequest):
+    """
+    Supervisor / Committee Review:
+    - Approve proposal (`action='approve'`)
+    - Reject proposal (`action='reject'`) with review notes and optional one-time re-open.
+    """
+    db = get_db()
+    loop = asyncio.get_running_loop()
+
+    def _review():
+        existing = db.get_project_by_id(project_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        action = (payload.action or "").strip().lower()
+        if action not in ("approve", "reject"):
+            raise HTTPException(status_code=400, detail="Action must be either 'approve' or 'reject'.")
+
+        new_status = "approved" if action == "approve" else "rejected"
+        fields = {
+            "status": new_status,
+            "review_notes": (payload.notes or "").strip(),
+        }
+        db.update_project(project_id, **fields)
+
+        # If rejected and supervisor allowed re-submission, re-open team's one-time token
+        if action == "reject" and payload.reopen_submission:
+            team_id = existing.get("team_id")
+            if team_id:
+                db.update_team(team_id, submission_allowed=True)
+
+        return db.get_project_by_id(project_id)
+
+    return await loop.run_in_executor(None, _review)
+
+
 @router.delete("/api/plagiarism/projects/{project_id}", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin"))])
 async def delete_project(project_id: str):
     db = get_db()
@@ -230,15 +371,18 @@ async def semantic_project_search(payload: SemanticSearchRequest):
 
     def _search():
         import numpy as np
+        import re
         from plagiarism_engine.vector_store import model_pool, DOMAIN_MODEL_KEYS
-        from plagiarism_engine.vectors.pgvector_store import PgVectorStore, _calibrate
+        from plagiarism_engine.vectors.pgvector_store import PgVectorStore
+        from plagiarism_engine.text_detector import normalize_arabic_text
 
         model, model_name = model_pool.get_model_with_name(DOMAIN_MODEL_KEYS["text"])
         if model is None:
             raise HTTPException(status_code=500, detail="Semantic search model is currently loading.")
 
-        from plagiarism_engine.text_detector import normalize_arabic_text
-        norm_query = normalize_arabic_text(query)
+        norm_query = normalize_arabic_text(query).lower()
+        query_words = [w for w in re.findall(r'[\w\u0600-\u06FF]+', norm_query) if len(w) > 1]
+
         raw_q_emb = model.encode(norm_query, convert_to_numpy=True)
         q_emb = PgVectorStore._normalize_and_pad_1d(raw_q_emb, 1024)
 
@@ -247,11 +391,19 @@ async def semantic_project_search(payload: SemanticSearchRequest):
             cur = conn.cursor()
             project_hits = {}
 
-            # 1. Fast match against pre-computed project abstract embeddings (Sub-millisecond NumPy)
+            # Helper for lexical token matching score
+            def _calc_lexical_score(text_corpus: str) -> float:
+                if not text_corpus or not query_words:
+                    return 0.0
+                norm_corpus = normalize_arabic_text(text_corpus).lower()
+                hits = sum(1 for w in query_words if w in norm_corpus)
+                return min(1.0, hits / max(1, len(query_words)))
+
+            # 1. Match against pre-computed project abstract embeddings and metadata
             sql_p = """
-                SELECT id, name, title, abstract, department, year, university, status, abstract_embedding
+                SELECT id, name, title, abstract, department, year, university, status, abstract_embedding, review_notes
                 FROM projects
-                WHERE abstract_embedding IS NOT NULL
+                WHERE 1=1
             """
             params_p = []
             if payload.department:
@@ -269,40 +421,63 @@ async def semantic_project_search(payload: SemanticSearchRequest):
                 pid = r[0]
                 name = r[1]
                 title = r[2] or name
-                abstract = r[3]
+                abstract = r[3] or ""
                 dept = r[4]
                 yr = r[5]
                 uni = r[6]
                 status = r[7] or "approved"
                 emb_raw = r[8]
+                review_notes = r[9] if len(r) > 9 else None
 
-                emb = PgVectorStore._parse_embedding(emb_raw)
-                if emb is None:
-                    continue
+                # 1. Lexical match score against title, abstract and department
+                combined_corpus = f"{title} {name} {abstract} {dept or ''}"
+                lex_score = _calc_lexical_score(combined_corpus)
 
-                sim = float(np.dot(q_emb, emb))
-                calibrated_sim = _calibrate(sim, model_name)
+                # 2. Dense semantic score
+                sem_score = 0.0
+                raw_cosine = 0.0
+                if emb_raw:
+                    emb = PgVectorStore._parse_embedding(emb_raw)
+                    if emb is not None:
+                        raw_cosine = float(np.dot(q_emb, emb))
+                        # For short query proposal search, scale cosine smoothly without the 0.72 drop-to-zero wall:
+                        sem_score = max(0.0, min(1.0, (raw_cosine - 0.35) / 0.55))
 
-                project_hits[pid] = {
-                    "project_id": pid,
-                    "name": name,
-                    "title": title,
-                    "abstract": abstract,
-                    "department": dept,
-                    "year": yr,
-                    "university": uni,
-                    "status": status,
-                    "similarity": round(calibrated_sim, 4),
-                    "similarity_raw": round(sim, 4),
-                    "similarity_percent": round(calibrated_sim * 100, 1),
-                    "top_matching_file": "project_abstract",
-                    "embedding_model": model_name,
-                }
+                # Hybrid fusion score
+                if sem_score > 0 and lex_score > 0:
+                    hybrid_score = 0.45 * lex_score + 0.55 * sem_score
+                elif sem_score > 0:
+                    hybrid_score = sem_score * 0.95
+                else:
+                    hybrid_score = lex_score * 0.85
+
+                # Exact title / name match bonus
+                if norm_query in normalize_arabic_text(title).lower() or norm_query in normalize_arabic_text(name).lower():
+                    hybrid_score = min(1.0, hybrid_score + 0.25)
+
+                if hybrid_score > 0.05:
+                    project_hits[pid] = {
+                        "project_id": pid,
+                        "name": name,
+                        "title": title,
+                        "abstract": abstract,
+                        "department": dept,
+                        "year": yr,
+                        "university": uni,
+                        "status": status,
+                        "review_notes": review_notes,
+                        "similarity": round(hybrid_score, 4),
+                        "similarity_raw": round(raw_cosine, 4),
+                        "similarity_percent": round(hybrid_score * 100, 1),
+                        "lexical_score": round(lex_score, 3),
+                        "top_matching_file": "project_abstract",
+                        "embedding_model": model_name,
+                    }
 
             # 2. Match against project documentation files with pre-stored embeddings
             sql_files = """
                 SELECT pf.project_id, pf.relative_path, pf.embedding, pf.embedding_model,
-                       p.name, p.title, p.abstract, p.department, p.year, p.university, p.status
+                       p.name, p.title, p.abstract, p.department, p.year, p.university, p.status, p.review_notes
                 FROM project_files pf
                 JOIN projects p ON p.id = pf.project_id
                 WHERE pf.file_type = 'text' AND pf.embedding IS NOT NULL
@@ -326,35 +501,49 @@ async def semantic_project_search(payload: SemanticSearchRequest):
                 emb_model = r[3]
                 name = r[4]
                 title = r[5] or name
-                abstract = r[6]
+                abstract = r[6] or ""
                 dept = r[7]
                 yr = r[8]
                 uni = r[9]
                 status = r[10] or "approved"
+                review_notes = r[11] if len(r) > 11 else None
 
                 emb = PgVectorStore._parse_embedding(emb_raw)
                 if emb is None:
                     continue
 
-                sim = float(np.dot(q_emb, emb))
-                calibrated_sim = _calibrate(sim, emb_model or model_name)
+                raw_cosine = float(np.dot(q_emb, emb))
+                sem_score = max(0.0, min(1.0, (raw_cosine - 0.35) / 0.55))
 
-                if pid not in project_hits or calibrated_sim > project_hits[pid]["similarity"]:
-                    project_hits[pid] = {
-                        "project_id": pid,
-                        "name": name,
-                        "title": title,
-                        "abstract": abstract or project_hits.get(pid, {}).get("abstract"),
-                        "department": dept,
-                        "year": yr,
-                        "university": uni,
-                        "status": status,
-                        "similarity": round(calibrated_sim, 4),
-                        "similarity_raw": round(sim, 4),
-                        "similarity_percent": round(calibrated_sim * 100, 1),
-                        "top_matching_file": rel_path,
-                        "embedding_model": emb_model or model_name,
-                    }
+                combined_corpus = f"{title} {name} {abstract} {rel_path}"
+                lex_score = _calc_lexical_score(combined_corpus)
+
+                if sem_score > 0 and lex_score > 0:
+                    hybrid_score = 0.45 * lex_score + 0.55 * sem_score
+                elif sem_score > 0:
+                    hybrid_score = sem_score * 0.95
+                else:
+                    hybrid_score = lex_score * 0.85
+
+                if pid not in project_hits or hybrid_score > project_hits[pid]["similarity"]:
+                    if hybrid_score > 0.05:
+                        project_hits[pid] = {
+                            "project_id": pid,
+                            "name": name,
+                            "title": title,
+                            "abstract": abstract or project_hits.get(pid, {}).get("abstract"),
+                            "department": dept,
+                            "year": yr,
+                            "university": uni,
+                            "status": status,
+                            "review_notes": review_notes,
+                            "similarity": round(hybrid_score, 4),
+                            "similarity_raw": round(raw_cosine, 4),
+                            "similarity_percent": round(hybrid_score * 100, 1),
+                            "lexical_score": round(lex_score, 3),
+                            "top_matching_file": rel_path,
+                            "embedding_model": emb_model or model_name,
+                        }
 
             thresh = payload.threshold if payload.threshold is not None else 0.15
             filtered = [p for p in project_hits.values() if p["similarity"] >= thresh]

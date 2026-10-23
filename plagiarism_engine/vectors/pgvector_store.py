@@ -1,4 +1,4 @@
-"""PgVector storage implementation with Binary Quantization & 2-Step Rescoring.
+﻿"""PgVector storage implementation with Binary Quantization & 2-Step Rescoring.
 
 Round 2 changes:
 - Every vector row carries `embedding_model` (the model folder that produced it). Rows are only

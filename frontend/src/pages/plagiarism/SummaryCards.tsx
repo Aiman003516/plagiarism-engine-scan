@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { ShieldCheck, AlertTriangle, FileCode2, Clock, FileWarning, ChevronDown, ChevronUp } from 'lucide-react';
 
 export interface SummaryCardsProps {

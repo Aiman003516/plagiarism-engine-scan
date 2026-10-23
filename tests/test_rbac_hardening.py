@@ -130,6 +130,123 @@ class TestRBACHardening(unittest.TestCase):
         res = self.client.delete("/api/users/user_admin_smoke", headers=self.ministry_admin_headers)
         self.assertEqual(res.status_code, 400)
 
+    def test_short_query_hybrid_semantic_search(self):
+        # Short 1-word query: "robotics" should not return 0 due to 0.72 floor
+        res = self.client.post(
+            "/api/plagiarism/projects/semantic-search",
+            json={"query": "robotics", "top_k": 5},
+            headers=self.student_headers
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertGreater(data["total_found"], 0)
+        self.assertGreater(data["projects"][0]["similarity_percent"], 15.0)
+
+    def test_supervisor_one_time_submission_workflow(self):
+        # 1. Setup a test team and assign student
+        import uuid
+        test_team_id = f"test_team_{uuid.uuid4().hex[:8]}"
+        self.db.create_team(test_team_id, "Autonomous Robotics Squad", "col_engineering")
+        self.db.add_team_member(test_team_id, "demo_student")
+
+        # 2. Initially submission_allowed is False -> student submit fails 403
+        submit_payload = {
+            "title": "Quadrotor SLAM in GPS-Denied Environments",
+            "abstract": "This graduation project explores autonomous LiDAR and visual SLAM for quadrotor drones.",
+        }
+        res = self.client.post(
+            "/api/plagiarism/projects/student-submit",
+            json=submit_payload,
+            headers=self.student_headers,
+        )
+        self.assertEqual(res.status_code, 403)
+
+        # 3. Faculty grants 1-time submission token
+        faculty_token = _create_access_token(
+            user_id="demo_faculty",
+            email="dr.sarah@cs.edu",
+            role="faculty",
+        )
+        res = self.client.post(
+            f"/api/teams/{test_team_id}/toggle-submission",
+            json={"allowed": True},
+            headers={"Authorization": f"Bearer {faculty_token}"},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()["submission_allowed"])
+
+        # 4. Student submits proposal -> 200 OK, project created with pending_review
+        res = self.client.post(
+            "/api/plagiarism/projects/student-submit",
+            json=submit_payload,
+            headers=self.student_headers,
+        )
+        self.assertEqual(res.status_code, 200)
+        created_project = res.json()
+        self.assertEqual(created_project["status"], "pending_review")
+        self.assertEqual(created_project["title"], submit_payload["title"])
+
+        # 5. Token is now consumed! Second submission attempt is blocked
+        res = self.client.post(
+            "/api/plagiarism/projects/student-submit",
+            json=submit_payload,
+            headers=self.student_headers,
+        )
+        self.assertEqual(res.status_code, 403)
+
+        # 6. Faculty reviews and rejects with revision request + reopen
+        res = self.client.post(
+            f"/api/plagiarism/projects/{created_project['id']}/review",
+            json={
+                "action": "reject",
+                "notes": "Please expand on the sensor fusion Kalman filter methodology.",
+                "reopen_submission": True,
+            },
+            headers={"Authorization": f"Bearer {faculty_token}"},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "rejected")
+
+        # 7. Team submission is reopened! Student submits revised proposal -> 200 OK
+        res = self.client.post(
+            "/api/plagiarism/projects/student-submit",
+            json={
+                "title": "Quadrotor SLAM with Extended Kalman Filter",
+                "abstract": "Updated proposal detailing EKF sensor fusion with IMU and stereoscopic vision.",
+            },
+            headers=self.student_headers,
+        )
+        self.assertEqual(res.status_code, 200)
+
+        # 8. Faculty approves proposal
+        res = self.client.post(
+            f"/api/plagiarism/projects/{res.json()['id']}/review",
+            json={"action": "approve", "notes": "Approved by academic committee."},
+            headers={"Authorization": f"Bearer {faculty_token}"},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "approved")
+
+        # Clean up
+        self.db.delete_team(test_team_id)
+
+    def test_direct_pair_comparison_semantic_and_paths(self):
+        # 1. Direct file upload pair comparison
+        files = {
+            "file_a": ("doc_a.txt", b"This is a technical research paper on neural network architectures and transformer self-attention mechanisms in computer vision.", "text/plain"),
+            "file_b": ("doc_b.txt", b"A study on deep learning transformer models and self-attention algorithms for automated image analysis.", "text/plain"),
+        }
+        res = self.client.post(
+            "/api/plagiarism/compare-direct-files",
+            files=files,
+            headers=self.college_admin_headers,
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertIn("similarity", data)
+        self.assertIn("semantic_score", data)
+        self.assertGreater(data["semantic_score"], 50.0)
+
 
 if __name__ == "__main__":
     unittest.main()

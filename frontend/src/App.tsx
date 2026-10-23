@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Ministry Plagiarism Engine — React App Entry
  * Responsive sidebar navigation for all Phase 1 pages.
  */

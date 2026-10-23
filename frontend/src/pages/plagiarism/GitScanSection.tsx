@@ -27,10 +27,17 @@ export function GitScanSection() {
       return;
     }
 
-    const gitProjectName = gitProjectTitle.trim() || gitRepoUrl.trim();
+    // Safely infer project name and prevent browser-autofill emails from contaminating it
+    let cleanProjectName = gitProjectTitle.trim();
+    if (!cleanProjectName || cleanProjectName.includes("@")) {
+      const cleanUrl = gitRepoUrl.trim().replace(/\.git$/, "").replace(/\/+$/, "");
+      const parts = cleanUrl.split("/");
+      cleanProjectName = parts[parts.length - 1] || "git_project";
+    }
+
     const controller = new AbortController();
     useScanStore.getState().setAbortController(controller);
-    useScanStore.getState().startScan(gitProjectName, 'intake');
+    useScanStore.getState().startScan(cleanProjectName, 'intake');
 
     const initialLogs = [
       `[${new Date().toLocaleTimeString()}] [GIT] Connecting to remote repository: ${gitRepoUrl.trim()}`,
@@ -39,11 +46,20 @@ export function GitScanSection() {
     ];
     initialLogs.forEach((log) => useScanStore.getState().appendLog(log));
 
+    // Auto-populate academic metadata from authenticated user profile
+    const userStr = localStorage.getItem("user_data") || localStorage.getItem("user");
+    let userData: any = {};
+    try { if (userStr) userData = JSON.parse(userStr); } catch {}
+
     const payload: GitRepoScanPayload = {
       repo_url: gitRepoUrl.trim(),
       branch: gitBranch.trim() || "main",
       access_token: gitAccessToken.trim() || undefined,
-      project_name: gitProjectTitle.trim() || undefined,
+      project_name: cleanProjectName,
+      title: cleanProjectName,
+      department: userData.department_name || userData.department_id || "Computer Engineering",
+      year: new Date().getFullYear(),
+      university: userData.university_name || "Baghdad University",
       scan_type: "Git Repository AI Integrity Scan"
     };
 
@@ -126,6 +142,8 @@ export function GitScanSection() {
             </label>
             <input 
               type="text"
+              autoComplete="off"
+              name="git_repo_project_title_no_autofill"
               placeholder={t("git_project_name_placeholder")}
               value={gitProjectTitle}
               onChange={(e) => setGitProjectTitle(e.target.value)}
@@ -141,6 +159,8 @@ export function GitScanSection() {
             </label>
             <input 
               type="password"
+              autoComplete="new-password"
+              name="git_token_secure_field"
               placeholder={t("git_token_placeholder")}
               value={gitAccessToken}
               onChange={(e) => setGitAccessToken(e.target.value)}

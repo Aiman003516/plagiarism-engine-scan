@@ -1,4 +1,4 @@
-"""System settings key/value store."""
+﻿"""System settings key/value store."""
 
 import json
 from typing import Dict, Any

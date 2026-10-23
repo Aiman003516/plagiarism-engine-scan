@@ -15,6 +15,12 @@ import {
   AlertTriangle,
   ArrowRight,
   ExternalLink,
+  Unlock,
+  Lock,
+  Send,
+  MessageSquare,
+  Clock,
+  XCircle,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
@@ -23,6 +29,8 @@ import {
   ProjectSummary,
   ProjectFile,
   SemanticSearchResult,
+  teamsApi,
+  TeamData,
 } from "../lib/api";
 import { useProjectsCache } from "../lib/useProjectsCache";
 
@@ -63,6 +71,91 @@ export default function Projects() {
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResult[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [modelUsed, setModelUsed] = useState("bge-m3");
+
+  // Student Submission & Team State
+  const [studentTeam, setStudentTeam] = useState<TeamData | null>(null);
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [submitTitle, setSubmitTitle] = useState("");
+  const [submitAbstract, setSubmitAbstract] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Supervisor Review Modal State
+  const [reviewModalProject, setReviewModalProject] = useState<ProjectSummary | null>(null);
+  const [reviewAction, setReviewAction] = useState<"approve" | "reject">("approve");
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [reviewReopen, setReviewReopen] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+
+  useEffect(() => {
+    if (isStudent) {
+      teamsApi.getAll()
+        .then((res) => {
+          if (res.teams && res.teams.length > 0) {
+            setStudentTeam(res.teams[0]);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isStudent]);
+
+  const handleStudentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!submitTitle.trim()) {
+      toast.error("Project title is required");
+      return;
+    }
+    if (!submitAbstract.trim()) {
+      toast.error("Proposal abstract / problem statement is required");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await plagiarismApi.studentSubmitProposal({
+        title: submitTitle.trim(),
+        abstract: submitAbstract.trim(),
+      });
+      toast.success("Graduation proposal submitted for supervisor review! ✓");
+      setShowSubmitModal(false);
+      setSubmitTitle("");
+      setSubmitAbstract("");
+      teamsApi.getAll().then((res) => {
+        if (res.teams && res.teams.length > 0) setStudentTeam(res.teams[0]);
+      });
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to submit proposal");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReviewSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reviewModalProject) return;
+
+    setReviewing(true);
+    try {
+      await plagiarismApi.reviewProject(reviewModalProject.id, {
+        action: reviewAction,
+        notes: reviewNotes.trim() || undefined,
+        reopen_submission: reviewReopen,
+      });
+      toast.success(
+        reviewAction === "approve"
+          ? `Project "${reviewModalProject.title || reviewModalProject.name}" approved!`
+          : `Project rejected. Feedback sent to student team.`
+      );
+      setReviewModalProject(null);
+      setReviewNotes("");
+      setReviewReopen(false);
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to complete review");
+    } finally {
+      setReviewing(false);
+    }
+  };
 
   const viewFiles = async (project: ProjectSummary | { id: string; title: string; name: string }) => {
     setLoadingFiles(true);
@@ -184,6 +277,49 @@ export default function Projects() {
       {/* ========================================================================= */}
       {activeTab === "repository" && (
         <>
+          {/* Student Proposal Status Banner */}
+          {isStudent && (
+            <div className="mb-6 p-5 rounded-2xl glass-card border border-glass-border">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className={`p-3 rounded-xl border ${studentTeam?.submission_allowed ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-500" : "bg-primary/10 border-primary/20 text-primary"}`}>
+                    {studentTeam?.submission_allowed ? <Unlock className="w-6 h-6" /> : <Lock className="w-6 h-6" />}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-text-main flex items-center gap-2">
+                      Graduation Proposal Submission Status
+                      {studentTeam?.submission_allowed ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                          1-Time Window Active
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-surface text-text-muted border border-glass-border">
+                          Submission Locked
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-xs text-text-muted mt-1 max-w-2xl leading-relaxed">
+                      {studentTeam?.submission_allowed
+                        ? `Your faculty supervisor has authorized a one-time proposal submission for team "${studentTeam.name}". Once submitted, your proposal will enter academic review.`
+                        : filtered.length > 0
+                        ? `Your proposal is currently recorded in the institutional database. Status: ${filtered[0].status?.toUpperCase()}${filtered[0].review_notes ? ` • Note: ${filtered[0].review_notes}` : ""}`
+                        : "Submissions require approval from your faculty supervisor. Please consult your academic department chair to unlock a one-time proposal window."}
+                    </p>
+                  </div>
+                </div>
+
+                {studentTeam?.submission_allowed && (
+                  <button
+                    onClick={() => setShowSubmitModal(true)}
+                    className="btn-primary flex items-center gap-2 whitespace-nowrap shadow-md"
+                  >
+                    <Send className="w-4 h-4" /> Submit Proposal
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="mb-4 flex justify-end">
             <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
@@ -245,16 +381,33 @@ export default function Projects() {
                         <td className="py-3 px-4">
                           <span
                             className={
-                              p.status === "pending"
-                                ? "inline-flex items-center rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-500 ring-1 ring-amber-500/20"
-                                : "inline-flex items-center rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-500 ring-1 ring-emerald-500/20"
+                              p.status === "pending_review"
+                                ? "inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2.5 py-0.5 text-xs font-semibold text-amber-600 dark:text-amber-400 ring-1 ring-amber-500/30"
+                                : p.status === "rejected"
+                                ? "inline-flex items-center gap-1 rounded-md bg-red-500/15 px-2.5 py-0.5 text-xs font-semibold text-red-600 dark:text-red-400 ring-1 ring-red-500/30"
+                                : "inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/30"
                             }
                           >
-                            {p.status?.toUpperCase() || "APPROVED"}
+                            {p.status === "pending_review" ? "PENDING REVIEW" : (p.status?.toUpperCase() || "APPROVED")}
                           </span>
                         </td>
                         <td className="py-3 px-4">
                           <div className="flex items-center justify-end gap-2">
+                            {p.status === "pending_review" && !isStudent && (
+                              <button
+                                onClick={() => {
+                                  setReviewModalProject(p);
+                                  setReviewAction("approve");
+                                  setReviewNotes("");
+                                  setReviewReopen(false);
+                                }}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-primary text-primary-text shadow-sm hover:bg-primary-hover transition-colors"
+                                title="Review Proposal"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Review
+                              </button>
+                            )}
                             {p.status === "pending" && !isStudent && (
                               <button
                                 onClick={() => approveProject(p)}
@@ -277,13 +430,15 @@ export default function Projects() {
                             >
                               <FileText className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => deleteProject(p)}
-                              className="btn-danger-icon"
-                              title={t("delete")}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {!isStudent && (
+                              <button
+                                onClick={() => deleteProject(p)}
+                                className="btn-danger-icon"
+                                title={t("delete")}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -529,6 +684,212 @@ export default function Projects() {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Student Proposal Submission Modal */}
+      {showSubmitModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="glass-panel w-full max-w-xl p-6 rounded-2xl shadow-2xl border border-glass-border">
+            <div className="flex items-start justify-between mb-4 border-b border-border/50 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
+                  <Send className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-text-main">Submit Graduation Project Proposal</h2>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    Authorized by your academic supervisor for team &ldquo;{studentTeam?.name}&rdquo;
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSubmitModal(false)}
+                className="p-1.5 rounded-lg text-text-muted hover:bg-surface"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleStudentSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-text-main mb-1.5">
+                  Project Title <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoComplete="off"
+                  placeholder="e.g. Smart IoT Monitoring & Fault Detection Platform"
+                  value={submitTitle}
+                  onChange={(e) => setSubmitTitle(e.target.value)}
+                  className="input-field w-full"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-text-main mb-1.5">
+                  Proposed Abstract / Problem Statement <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  required
+                  rows={4}
+                  placeholder="Detail the technical objectives, methodologies, algorithms, and expected deliverables..."
+                  value={submitAbstract}
+                  onChange={(e) => setSubmitAbstract(e.target.value)}
+                  className="input-field w-full resize-none leading-relaxed"
+                />
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-surface/50 border border-glass-border text-xs text-text-muted flex items-start gap-2.5">
+                <Clock className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                <span>
+                  Once submitted, your one-time submission token will be consumed. Your proposal will be securely indexed and sent to your department supervisor for formal review.
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSubmitModal(false)}
+                  className="btn-secondary px-4 py-2 text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="btn-primary px-5 py-2 text-xs font-semibold flex items-center gap-2 shadow-md disabled:opacity-50"
+                >
+                  {submitting ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Submitting...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-3.5 h-3.5" /> Submit for Review
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Supervisor Review Decision Modal */}
+      {reviewModalProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="glass-panel w-full max-w-lg p-6 rounded-2xl shadow-2xl border border-glass-border">
+            <div className="flex items-start justify-between mb-4 border-b border-border/50 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-base font-bold text-text-main truncate">
+                    Review Proposal: {reviewModalProject.title || reviewModalProject.name}
+                  </h2>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    Institution Committee Evaluation & Decision
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setReviewModalProject(null)}
+                className="p-1.5 rounded-lg text-text-muted hover:bg-surface"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleReviewSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-text-main mb-2">
+                  Review Decision
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setReviewAction("approve")}
+                    className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+                      reviewAction === "approve"
+                        ? "bg-emerald-500/20 border-emerald-500 text-emerald-600 dark:text-emerald-400 ring-2 ring-emerald-500/30"
+                        : "bg-surface/50 border-glass-border text-text-muted hover:text-text-main"
+                    }`}
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Approve Proposal
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setReviewAction("reject")}
+                    className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+                      reviewAction === "reject"
+                        ? "bg-rose-500/20 border-rose-500 text-rose-600 dark:text-rose-400 ring-2 ring-rose-500/30"
+                        : "bg-surface/50 border-glass-border text-text-muted hover:text-text-main"
+                    }`}
+                  >
+                    <XCircle className="w-4 h-4 text-rose-500" /> Request Revisions / Reject
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-text-main mb-1.5">
+                  Supervisor Notes & Revision Feedback
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Provide constructive feedback for the students or record committee meeting notes..."
+                  value={reviewNotes}
+                  onChange={(e) => setReviewNotes(e.target.value)}
+                  className="input-field w-full resize-none leading-relaxed text-xs"
+                />
+              </div>
+
+              {reviewAction === "reject" && (
+                <label className="flex items-center gap-2 p-3 rounded-xl bg-surface/50 border border-glass-border text-xs text-text-main cursor-pointer hover:bg-surface transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={reviewReopen}
+                    onChange={(e) => setReviewReopen(e.target.checked)}
+                    className="rounded text-primary focus:ring-primary w-4 h-4"
+                  />
+                  <span>Allow student team to submit a revised proposal (Re-opens 1-time token)</span>
+                </label>
+              )}
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setReviewModalProject(null)}
+                  className="btn-secondary px-4 py-2 text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={reviewing}
+                  className={`px-5 py-2 rounded-xl text-xs font-semibold text-white shadow-md flex items-center gap-2 disabled:opacity-50 ${
+                    reviewAction === "approve"
+                      ? "bg-emerald-600 hover:bg-emerald-700"
+                      : "bg-rose-600 hover:bg-rose-700"
+                  }`}
+                >
+                  {reviewing ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Saving...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Confirm Decision
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

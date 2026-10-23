@@ -1,4 +1,4 @@
-"""Connection management: constructor, PostgreSQL bootstrap, SQLite fallback."""
+﻿"""Connection management: constructor, PostgreSQL bootstrap, SQLite fallback."""
 
 import os
 import sqlite3

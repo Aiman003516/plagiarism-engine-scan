@@ -1,4 +1,4 @@
-"""Winnowing fingerprint storage and candidate queries."""
+﻿"""Winnowing fingerprint storage and candidate queries."""
 
 
 from typing import Optional, Iterable, List, Dict, Any, Tuple

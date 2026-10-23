@@ -1,4 +1,4 @@
-"""
+﻿"""
 Relational storage package for the Plagiarism Detection Engine.
 
 `SystemDBStore` is assembled from per-domain mixins so each concern lives in its

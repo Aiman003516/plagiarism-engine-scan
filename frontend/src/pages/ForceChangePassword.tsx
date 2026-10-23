@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ForceChangePassword — mandatory password rotation screen.
  *
  * Reached from /login or /register when the backend reports

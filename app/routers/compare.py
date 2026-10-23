@@ -1,4 +1,4 @@
-"""Project-vs-project and file-vs-file comparison endpoints."""
+﻿"""Project-vs-project and file-vs-file comparison endpoints."""
 
 import os
 import asyncio
@@ -269,8 +269,28 @@ async def compare_direct_files(
                 return text, ftype, filename
 
         elif project_id and file_path:
-            db_files = db.get_files_by_paths(project_id, [file_path])
+            norm_path = file_path.replace("\\", "/")
+            win_path = file_path.replace("/", "\\")
+            paths_to_check = list(set([file_path, norm_path, win_path]))
+            db_files = db.get_files_by_paths(project_id, paths_to_check, target_project_id=project_id)
             if not db_files:
+                conn = db._get_connection()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT content, file_type FROM project_files WHERE project_id = %s AND (relative_path = %s OR relative_path = %s OR relative_path = %s) LIMIT 1;",
+                        (project_id, file_path, norm_path, win_path)
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        from plagiarism_engine.db.helpers import decompress_text
+                        raw_c = row[0]
+                        content_str = decompress_text(raw_c) if isinstance(raw_c, (bytes, bytearray, memoryview)) else (raw_c or "")
+                        return content_str, row[1] or file_type_for(file_path) or "text", f"{project_id} : {file_path}"
+                except Exception:
+                    pass
+                finally:
+                    conn.close()
                 raise HTTPException(status_code=404, detail=f"File '{file_path}' not found in project '{project_id}'.")
             item = db_files[0]
             content = item.get("content", "")
@@ -289,9 +309,32 @@ async def compare_direct_files(
     eff_type = "code" if (type_a == "code" or type_b == "code") else "text"
     winnow_engine = WinnowingEngine()
 
+    # Calculate semantic embedding similarity between the two documents
+    semantic_score = 0.0
+    try:
+        import numpy as np
+        from plagiarism_engine.vector_store import model_pool, DOMAIN_MODEL_KEYS
+        from plagiarism_engine.vectors.pgvector_store import PgVectorStore
+        from plagiarism_engine.text_detector import normalize_arabic_text
+
+        domain_key = DOMAIN_MODEL_KEYS.get(eff_type, "bge_m3")
+        model, _ = model_pool.get_model_with_name(domain_key)
+        if model is not None:
+            text_a = normalize_arabic_text(content_a[:2500]) if eff_type == "text" else content_a[:2500]
+            text_b = normalize_arabic_text(content_b[:2500]) if eff_type == "text" else content_b[:2500]
+            emb_a = model.encode(text_a, convert_to_numpy=True)
+            emb_b = model.encode(text_b, convert_to_numpy=True)
+            vec_a = PgVectorStore._normalize_and_pad_1d(emb_a, 1024)
+            vec_b = PgVectorStore._normalize_and_pad_1d(emb_b, 1024)
+            raw_cosine = float(np.dot(vec_a, vec_b))
+            semantic_score = float(max(0.0, min(1.0, raw_cosine)))
+    except Exception as e:
+        print(f"Warning computing direct file comparison semantic score: {e}")
+
     fusion_result = compute_fusion_score(
         file_a_content=content_a,
         file_b_content=content_b,
+        semantic_score=semantic_score,
         file_type=eff_type,
         winnowing_engine=winnow_engine,
         filename=name_a,

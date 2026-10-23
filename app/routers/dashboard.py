@@ -1,4 +1,4 @@
-"""System health and dashboard statistics endpoints."""
+﻿"""System health and dashboard statistics endpoints."""
 
 import asyncio
 import time

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+﻿import React, { useState, useMemo } from 'react';
 import { BarChart3, ShieldCheck, Loader2, Search, ChevronLeft, ChevronRight, Filter } from 'lucide-react';
 import type { PlagiarismComparison } from '../../lib/api';
 

@@ -1,4 +1,4 @@
-"""AI deep scan endpoints (single and bulk)."""
+﻿"""AI deep scan endpoints (single and bulk)."""
 
 import asyncio
 import threading

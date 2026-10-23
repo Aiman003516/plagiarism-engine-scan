@@ -1,4 +1,4 @@
-"""Teams and team membership."""
+﻿"""Teams and team membership."""
 
 from typing import List, Dict, Any, Optional
 
@@ -42,19 +42,27 @@ class TeamsStoreMixin:
             if college_id:
                 cid = clean_str(college_id)
                 if self.mode == "postgresql":
-                    cur.execute("SELECT id, name, college_id, created_at FROM teams WHERE college_id = %s ORDER BY created_at DESC;", (cid,))
+                    cur.execute("SELECT id, name, college_id, created_at, COALESCE(submission_allowed, FALSE) FROM teams WHERE college_id = %s ORDER BY created_at DESC;", (cid,))
                 else:
-                    cur.execute("SELECT id, name, college_id, created_at FROM teams WHERE college_id = ? ORDER BY created_at DESC;", (cid,))
+                    cur.execute("SELECT id, name, college_id, created_at, COALESCE(submission_allowed, 0) FROM teams WHERE college_id = ? ORDER BY created_at DESC;", (cid,))
             else:
-                cur.execute("SELECT id, name, college_id, created_at FROM teams ORDER BY created_at DESC;")
+                cur.execute("SELECT id, name, college_id, created_at, COALESCE(submission_allowed, FALSE) FROM teams ORDER BY created_at DESC;")
             rows = cur.fetchall()
 
             teams = []
             for r in rows:
                 if isinstance(r, dict) or hasattr(r, 'keys'):
-                    teams.append(dict(r))
+                    d = dict(r)
+                    d["submission_allowed"] = bool(d.get("submission_allowed", False))
+                    teams.append(d)
                 else:
-                    teams.append({"id": r[0], "name": r[1], "college_id": r[2], "created_at": r[3]})
+                    teams.append({
+                        "id": r[0],
+                        "name": r[1],
+                        "college_id": r[2],
+                        "created_at": r[3],
+                        "submission_allowed": bool(r[4]) if len(r) > 4 else False,
+                    })
             return teams
         finally:
             conn.close()
@@ -66,15 +74,23 @@ class TeamsStoreMixin:
             cur = conn.cursor()
             tid = clean_str(team_id)
             if self.mode == "postgresql":
-                cur.execute("SELECT id, name, college_id, created_at FROM teams WHERE id = %s;", (tid,))
+                cur.execute("SELECT id, name, college_id, created_at, COALESCE(submission_allowed, FALSE) FROM teams WHERE id = %s;", (tid,))
             else:
-                cur.execute("SELECT id, name, college_id, created_at FROM teams WHERE id = ?;", (tid,))
+                cur.execute("SELECT id, name, college_id, created_at, COALESCE(submission_allowed, 0) FROM teams WHERE id = ?;", (tid,))
             row = cur.fetchone()
             if not row:
                 return None
             if isinstance(row, dict) or hasattr(row, 'keys'):
-                return dict(row)
-            return {"id": row[0], "name": row[1], "college_id": row[2], "created_at": row[3]}
+                d = dict(row)
+                d["submission_allowed"] = bool(d.get("submission_allowed", False))
+                return d
+            return {
+                "id": row[0],
+                "name": row[1],
+                "college_id": row[2],
+                "created_at": row[3],
+                "submission_allowed": bool(row[4]) if len(row) > 4 else False,
+            }
         finally:
             conn.close()
 
@@ -83,8 +99,15 @@ class TeamsStoreMixin:
         conn = self._get_connection()
         try:
             cur = conn.cursor()
-            allowed = {"name", "college_id"}
-            updates = {k: clean_str(v) for k, v in fields.items() if k in allowed and v is not None}
+            allowed = {"name", "college_id", "submission_allowed"}
+            updates = {}
+            for k, v in fields.items():
+                if k not in allowed or v is None:
+                    continue
+                if k == "submission_allowed":
+                    updates[k] = bool(v)
+                else:
+                    updates[k] = clean_str(v)
             if not updates:
                 return
             if self.mode == "postgresql":
