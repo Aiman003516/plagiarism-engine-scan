@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Sidebar — responsive navigation rail for the authenticated app shell.
  * Rendered only from <AppLayout />, so public auth pages (/login, /register)
  * never show application chrome.
@@ -146,6 +146,10 @@ function Sidebar() {
             // Also drop the cached profile so no PII lingers on shared machines
             // (mirrors the 401 handler in lib/api.ts).
             localStorage.removeItem("user_data");
+            localStorage.removeItem("plagiarism-scan-storage");
+            try {
+              useScanStore.getState().resetAll();
+            } catch {}
             window.location.href = "/login";
           }}
           className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-danger hover:bg-danger/10 transition-colors"

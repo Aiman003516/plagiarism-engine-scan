@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Terminal, Copy, Download, Clock } from "lucide-react";
+import { Terminal, Copy, Download, Clock, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "react-hot-toast";
 import { useScanStore, ScanSource } from "../../lib/scanStore";
@@ -136,6 +136,14 @@ export function ScanProgress({ scope }: ScanProgressProps = {}) {
             title={t("download_logs")}
           >
             <Download className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => useScanStore.getState().resetScan()}
+            disabled={isScanning}
+            className="p-1.5 rounded-lg bg-surface hover:bg-red-500/10 text-text-muted hover:text-red-500 transition-colors disabled:opacity-40"
+            title="Clear Terminal Output"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>

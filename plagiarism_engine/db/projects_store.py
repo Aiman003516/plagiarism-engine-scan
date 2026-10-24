@@ -139,10 +139,13 @@ class ProjectsStoreMixin:
             projects = []
             for r in rows:
                 if isinstance(r, dict) or hasattr(r, 'keys'):
-                    projects.append(dict(r))
+                    item = dict(r)
+                    if item.get("abstract"):
+                        item["abstract"] = decompress_text(item["abstract"])
+                    projects.append(item)
                 else:
                     projects.append({
-                        "id": r[0], "name": r[1], "title": r[2], "abstract": r[3],
+                        "id": r[0], "name": r[1], "title": r[2], "abstract": decompress_text(r[3]) if r[3] else "",
                         "team_id": r[4], "department": r[5], "year": r[6],
                         "university": r[7], "status": r[8], "created_at": r[9],
                         "student_id": r[10],
@@ -194,9 +197,12 @@ class ProjectsStoreMixin:
             if not row:
                 return None
             if isinstance(row, dict) or hasattr(row, 'keys'):
-                return dict(row)
+                item = dict(row)
+                if item.get("abstract"):
+                    item["abstract"] = decompress_text(item["abstract"])
+                return item
             return {
-                "id": row[0], "name": row[1], "title": row[2], "abstract": row[3],
+                "id": row[0], "name": row[1], "title": row[2], "abstract": decompress_text(row[3]) if row[3] else "",
                 "team_id": row[4], "department": row[5], "year": row[6],
                 "university": row[7], "status": row[8], "created_at": row[9],
                 "student_id": row[10] if len(row) > 10 else None,

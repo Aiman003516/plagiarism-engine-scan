@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { PlagiarismScanResult } from './api';
 
@@ -60,6 +60,7 @@ interface ScanStore {
   setBloatStats: (filtered: number, totalNodes: number) => void;
   
   appendLog: (text: string) => void;
+  clearLogsOnly: () => void;
   /** Append a line that came FROM the backend stream, advancing the resume cursor. */
   noteServerLog: (text: string) => void;
   setScanSource: (source: ScanSource | null) => void;
@@ -137,6 +138,7 @@ export const useScanStore = create<ScanStore>()(persist((set) => ({
   // Group B actions
   setScanSource: (source) => set({ scanSource: source }),
   appendLog: (text) => set((s) => ({ scanLogs: [...s.scanLogs, text] })),
+  clearLogsOnly: () => set({ scanLogs: [], scanError: null }),
   // Server-originated lines advance the resume cursor, so a re-attach can ask the
   // backend to replay only what we missed (`?after=streamLogCount`) instead of
   // re-appending the whole terminal on every navigate-back.

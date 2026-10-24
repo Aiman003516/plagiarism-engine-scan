@@ -1,4 +1,4 @@
-﻿"""Users CRUD endpoints."""
+"""Users CRUD endpoints."""
 
 import asyncio
 import uuid
@@ -97,7 +97,7 @@ async def list_users(
         caller_uni = caller_record.get("university_id")
         users = [
             u for u in users
-            if (u.get("university_id") == caller_uni or not u.get("university_id"))
+            if u.get("university_id") == caller_uni
             and u.get("role") != "ministry_admin"
         ]
     else:

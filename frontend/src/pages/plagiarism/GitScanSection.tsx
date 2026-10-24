@@ -35,6 +35,9 @@ export function GitScanSection() {
       cleanProjectName = parts[parts.length - 1] || "git_project";
     }
 
+    // Reset previous terminal logs
+    useScanStore.getState().resetScan();
+
     const controller = new AbortController();
     useScanStore.getState().setAbortController(controller);
     useScanStore.getState().startScan(cleanProjectName, 'intake');
@@ -59,7 +62,7 @@ export function GitScanSection() {
       title: cleanProjectName,
       department: userData.department_name || userData.department_id || "Computer Engineering",
       year: new Date().getFullYear(),
-      university: userData.university_name || "Baghdad University",
+      university: userData.university_name || "Sana'a University",
       scan_type: "Git Repository AI Integrity Scan"
     };
 

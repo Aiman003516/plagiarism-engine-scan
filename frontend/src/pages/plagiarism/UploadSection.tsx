@@ -63,6 +63,9 @@ export function UploadSection() {
   const [stagedCategory, setStagedCategory] = useState<"all" | "code" | "text" | "archive">("all");
 
   const processRawFiles = async (files: File[], customPaths?: string[]) => {
+    // Wipe previous live scan stream logs when staging new files for fresh intake/scan
+    useScanStore.getState().resetScan();
+
     useScanStore.getState().setProcessingState({
       isProcessing: true,
       total: files.length,
@@ -155,9 +158,9 @@ export function UploadSection() {
       return [...prev, ...filteredNew];
     });
 
-    if (detectedProjectName && !projectName) {
+    if (detectedProjectName) {
       useScanStore.getState().setProjectName(detectedProjectName);
-    } else if (files.length === 1 && !projectName) {
+    } else if (files.length === 1) {
       useScanStore.getState().setProjectName(files[0].name.replace(/\.[^/.]+$/, ""));
     }
 
@@ -437,18 +440,6 @@ export function UploadSection() {
               <p className="text-xs text-text-muted mt-2 mb-6 text-center max-w-xl leading-relaxed">
                 {t("unified_upload_sub")}
               </p>
-
-              <div className="w-full max-w-sm mb-4" onClick={(e) => e.stopPropagation()}>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  name="project_upload_name_no_autofill"
-                  placeholder="Project Name (e.g., Spring2026_Final)"
-                  className="w-full bg-surface border border-glass-border rounded-xl px-4 py-2.5 text-sm text-text-main focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50 transition-all placeholder:text-text-muted/50"
-                  value={projectName}
-                  onChange={(e) => useScanStore.getState().setProjectName(e.target.value)}
-                />
-              </div>
 
               <div
                 className="flex flex-wrap items-center justify-center gap-3 z-10"

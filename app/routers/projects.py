@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from app.dependencies import require_role
 from app.services.embeddings import _index_project_embeddings
 from app.state import get_db, get_vstore
+from plagiarism_engine.db.helpers import decompress_text
 
 router = APIRouter(tags=["projects"])
 
@@ -21,16 +22,51 @@ async def list_projects(limit: int = 1000, page: int = 1, current_user: dict = D
     projects = await loop.run_in_executor(None, lambda: db.get_all_projects(page=page, limit=limit))
 
     serialized = []
-    is_student = current_user.get("role") == "student"
+    caller_role = current_user.get("role")
     caller_id = current_user.get("user_id")
+
+    caller_record = {}
+    if caller_role == "student":
+        caller_record = await loop.run_in_executor(None, lambda: db.get_student_by_id(caller_id)) or {}
+    else:
+        caller_record = await loop.run_in_executor(None, lambda: db.get_user_by_id(caller_id)) or {}
+
+    caller_college = caller_record.get("college_id")
+    caller_uni = caller_record.get("university_id")
 
     for project in projects:
         item = dict(project)
         if not item.get("status"):
             item["status"] = "approved"
         item.setdefault("student_id", None)
-        if is_student and item.get("student_id") != caller_id:
-            continue
+
+        proj_status = item.get("status")
+        proj_college = item.get("college_id")
+        proj_uni = item.get("university_id")
+
+        if caller_role == "student":
+            if item.get("student_id") != caller_id and item.get("submitted_by_student_id") != caller_id:
+                continue
+
+        elif caller_role in ("college_admin", "faculty"):
+            if proj_status == "pending_review":
+                if proj_college and caller_college and proj_college != caller_college:
+                    continue
+            else:
+                if proj_college and caller_college and proj_college != caller_college:
+                    continue
+
+        elif caller_role == "university_admin":
+            if proj_status == "pending_review":
+                if proj_uni and caller_uni and proj_uni != caller_uni:
+                    continue
+            else:
+                if proj_uni and caller_uni and proj_uni != caller_uni:
+                    continue
+
+        if item.get("abstract"):
+            item["abstract"] = decompress_text(item["abstract"])
+
         serialized.append(item)
 
     return {"projects": serialized}
@@ -223,8 +259,8 @@ async def student_submit_proposal(payload: StudentSubmitRequest, current_user: d
     return await loop.run_in_executor(None, _submit)
 
 
-@router.post("/api/plagiarism/projects/{project_id}/review", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
-async def review_project(project_id: str, payload: ProjectReviewRequest):
+@router.post("/api/plagiarism/projects/{project_id}/review")
+async def review_project(project_id: str, payload: ProjectReviewRequest, current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))):
     """
     Supervisor / Committee Review:
     - Approve proposal (`action='approve'`)
@@ -237,6 +273,19 @@ async def review_project(project_id: str, payload: ProjectReviewRequest):
         existing = db.get_project_by_id(project_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Project not found")
+
+        caller_role = current_user.get("role")
+        caller_record = db.get_user_by_id(current_user["user_id"]) or {}
+        if caller_role in ("college_admin", "faculty"):
+            caller_college = caller_record.get("college_id")
+            proj_college = existing.get("college_id")
+            if proj_college and caller_college and proj_college != caller_college:
+                raise HTTPException(status_code=403, detail="Cannot review proposals belonging to another college.")
+        elif caller_role == "university_admin":
+            caller_uni = caller_record.get("university_id")
+            proj_uni = existing.get("university_id")
+            if proj_uni and caller_uni and proj_uni != caller_uni:
+                raise HTTPException(status_code=403, detail="Cannot review proposals belonging to another university.")
 
         action = (payload.action or "").strip().lower()
         if action not in ("approve", "reject"):
@@ -260,13 +309,25 @@ async def review_project(project_id: str, payload: ProjectReviewRequest):
     return await loop.run_in_executor(None, _review)
 
 
-@router.delete("/api/plagiarism/projects/{project_id}", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin"))])
-async def delete_project(project_id: str):
+@router.delete("/api/plagiarism/projects/{project_id}")
+async def delete_project(project_id: str, current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin"))):
     db = get_db()
     loop = asyncio.get_running_loop()
     existing = await loop.run_in_executor(None, lambda: db.get_project_by_id(project_id))
     if not existing:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    caller_role = current_user.get("role")
+    caller_record = await loop.run_in_executor(None, lambda: db.get_user_by_id(current_user["user_id"])) or {}
+    if caller_role == "college_admin":
+        caller_college = caller_record.get("college_id")
+        if existing.get("college_id") and caller_college and existing.get("college_id") != caller_college:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to delete a project from another college.")
+    elif caller_role == "university_admin":
+        caller_uni = caller_record.get("university_id")
+        if existing.get("university_id") and caller_uni and existing.get("university_id") != caller_uni:
+            raise HTTPException(status_code=403, detail="Insufficient permissions to delete a project from another university.")
+
     await loop.run_in_executor(None, lambda: db.delete_project(project_id))
 
     # Clean up the project's embeddings from the Postgres vector store as well.
@@ -421,7 +482,7 @@ async def semantic_project_search(payload: SemanticSearchRequest):
                 pid = r[0]
                 name = r[1]
                 title = r[2] or name
-                abstract = r[3] or ""
+                abstract = decompress_text(r[3]) if r[3] else ""
                 dept = r[4]
                 yr = r[5]
                 uni = r[6]
@@ -447,7 +508,11 @@ async def semantic_project_search(payload: SemanticSearchRequest):
                 if sem_score > 0 and lex_score > 0:
                     hybrid_score = 0.45 * lex_score + 0.55 * sem_score
                 elif sem_score > 0:
-                    hybrid_score = sem_score * 0.95
+                    words_in_q = len(norm_query.split())
+                    if words_in_q < 5:
+                        hybrid_score = sem_score * 0.50
+                    else:
+                        hybrid_score = sem_score * 0.75
                 else:
                     hybrid_score = lex_score * 0.85
 
@@ -501,7 +566,7 @@ async def semantic_project_search(payload: SemanticSearchRequest):
                 emb_model = r[3]
                 name = r[4]
                 title = r[5] or name
-                abstract = r[6] or ""
+                abstract = decompress_text(r[6]) if r[6] else ""
                 dept = r[7]
                 yr = r[8]
                 uni = r[9]
@@ -521,7 +586,11 @@ async def semantic_project_search(payload: SemanticSearchRequest):
                 if sem_score > 0 and lex_score > 0:
                     hybrid_score = 0.45 * lex_score + 0.55 * sem_score
                 elif sem_score > 0:
-                    hybrid_score = sem_score * 0.95
+                    words_in_q = len(norm_query.split())
+                    if words_in_q < 5:
+                        hybrid_score = sem_score * 0.50
+                    else:
+                        hybrid_score = sem_score * 0.75
                 else:
                     hybrid_score = lex_score * 0.85
 

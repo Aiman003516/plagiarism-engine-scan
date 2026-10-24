@@ -12,22 +12,22 @@ class TestRBACHardening(unittest.TestCase):
         cls.client = TestClient(app)
         cls.db = get_db()
         cls.student_token = _create_access_token(
-            user_id="demo_student",
-            email="20240001@student.edu",
+            user_id="std_2024101001",
+            email="2024101001@student.system",
             role="student",
         )
         cls.student_headers = {"Authorization": f"Bearer {cls.student_token}"}
 
         cls.college_admin_token = _create_access_token(
-            user_id="demo_college_admin",
-            email="dean@engineering.edu",
+            user_id="usr_sanaa_dean_cit",
+            email="dean.cit@su.edu.ye",
             role="college_admin",
         )
         cls.college_admin_headers = {"Authorization": f"Bearer {cls.college_admin_token}"}
 
         cls.ministry_admin_token = _create_access_token(
-            user_id="user_admin_smoke",
-            email="admin@ministry.gov",
+            user_id="usr_mohesr_admin",
+            email="admin@mohesr.gov.ye",
             role="ministry_admin",
         )
         cls.ministry_admin_headers = {"Authorization": f"Bearer {cls.ministry_admin_token}"}
@@ -112,7 +112,7 @@ class TestRBACHardening(unittest.TestCase):
     def test_self_lockout_and_self_deletion(self):
         # College admin modifying own role
         res = self.client.put(
-            "/api/users/demo_college_admin",
+            "/api/users/usr_sanaa_dean_cit",
             json={"role": "student"},
             headers=self.college_admin_headers
         )
@@ -120,14 +120,14 @@ class TestRBACHardening(unittest.TestCase):
 
         # Ministry admin modifying own role
         res = self.client.put(
-            "/api/users/user_admin_smoke",
+            "/api/users/usr_mohesr_admin",
             json={"role": "faculty"},
             headers=self.ministry_admin_headers
         )
         self.assertEqual(res.status_code, 403)
 
         # Admin deleting own account
-        res = self.client.delete("/api/users/user_admin_smoke", headers=self.ministry_admin_headers)
+        res = self.client.delete("/api/users/usr_mohesr_admin", headers=self.ministry_admin_headers)
         self.assertEqual(res.status_code, 400)
 
     def test_short_query_hybrid_semantic_search(self):
@@ -146,8 +146,8 @@ class TestRBACHardening(unittest.TestCase):
         # 1. Setup a test team and assign student
         import uuid
         test_team_id = f"test_team_{uuid.uuid4().hex[:8]}"
-        self.db.create_team(test_team_id, "Autonomous Robotics Squad", "col_engineering")
-        self.db.add_team_member(test_team_id, "demo_student")
+        self.db.create_team(test_team_id, "Autonomous Robotics Squad", "col_sanaa_cit")
+        self.db.add_team_member(test_team_id, "std_2024101001")
 
         # 2. Initially submission_allowed is False -> student submit fails 403
         submit_payload = {
@@ -163,8 +163,8 @@ class TestRBACHardening(unittest.TestCase):
 
         # 3. Faculty grants 1-time submission token
         faculty_token = _create_access_token(
-            user_id="demo_faculty",
-            email="dr.sarah@cs.edu",
+            user_id="usr_sanaa_fac_ammar",
+            email="dr.ammar@su.edu.ye",
             role="faculty",
         )
         res = self.client.post(
@@ -246,6 +246,76 @@ class TestRBACHardening(unittest.TestCase):
         self.assertIn("similarity", data)
         self.assertIn("semantic_score", data)
         self.assertGreater(data["semantic_score"], 50.0)
+
+    def test_institutional_scoping_and_cross_university_isolation(self):
+        # 1. Login with real credentials for Dean of Ibb Engineering & IT
+        res = self.client.post("/api/auth/login", json={"email": "dean.eng@univibb.edu.ye", "password": "Dean@2026"})
+        self.assertEqual(res.status_code, 200)
+        ibb_dean_token = res.json()["token"]
+        ibb_headers = {"Authorization": f"Bearer {ibb_dean_token}"}
+
+        # 2. Query /api/teams as Dean of Ibb Eng & IT -> Only Ibb Cloud Pioneers (col_ibb_eng)
+        res = self.client.get("/api/teams", headers=ibb_headers)
+        self.assertEqual(res.status_code, 200)
+        teams = res.json()["teams"]
+        team_names = [t["name"] for t in teams]
+        self.assertTrue(any("الحوسبة السحابية" in name or "Ibb Cloud Pioneers" in name for name in team_names))
+        # Ensure Sana'a and Thamar teams are INVISIBLE
+        self.assertFalse(any("الذكاء الاصطناعي" in name for name in team_names))
+        self.assertFalse(any("ذمار" in name for name in team_names))
+
+        # 3. Query /api/users as Dean of Ibb Eng & IT -> Only col_ibb_eng users
+        res = self.client.get("/api/users", headers=ibb_headers)
+        self.assertEqual(res.status_code, 200)
+        users = res.json()["users"]
+        user_emails = [u["email"] for u in users]
+        self.assertIn("dr.khaled@univibb.edu.ye", user_emails)
+        self.assertNotIn("dr.ammar@su.edu.ye", user_emails)
+        self.assertNotIn("dr.fatima@tu.edu.ye", user_emails)
+
+        # 4. Dean of Ibb attempts to create team for Sana'a -> 403 Forbidden
+        res = self.client.post("/api/teams", json={"name": "Hacked Sana Team", "college_id": "col_sanaa_cit"}, headers=ibb_headers)
+        self.assertEqual(res.status_code, 403)
+
+        # 5. Login as Dean of Sana'a Computer & IT
+        res = self.client.post("/api/auth/login", json={"email": "dean.cit@su.edu.ye", "password": "Dean@2026"})
+        self.assertEqual(res.status_code, 200)
+        sanaa_cit_token = res.json()["token"]
+        sanaa_cit_headers = {"Authorization": f"Bearer {sanaa_cit_token}"}
+
+        # Query /api/teams -> Sees Sana'a AI Visionaries, does NOT see Sana'a Embedded Systems (Faculty of Engineering)
+        res = self.client.get("/api/teams", headers=sanaa_cit_headers)
+        self.assertEqual(res.status_code, 200)
+        sanaa_teams = res.json()["teams"]
+        sanaa_team_names = [t["name"] for t in sanaa_teams]
+        self.assertTrue(any("الذكاء الاصطناعي" in name for name in sanaa_team_names))
+        self.assertFalse(any("النظم المدمجة" in name for name in sanaa_team_names))
+
+        # 6. Login as University Admin of Sana'a (Rector)
+        res = self.client.post("/api/auth/login", json={"email": "rector@su.edu.ye", "password": "Sanaa@2026"})
+        self.assertEqual(res.status_code, 200)
+        rector_token = res.json()["token"]
+        rector_headers = {"Authorization": f"Bearer {rector_token}"}
+
+        # Query /api/teams -> Sees BOTH Computer & IT and Engineering teams in Sana'a, does NOT see Ibb or Thamar
+        res = self.client.get("/api/teams", headers=rector_headers)
+        self.assertEqual(res.status_code, 200)
+        rector_teams = res.json()["teams"]
+        rector_team_names = [t["name"] for t in rector_teams]
+        self.assertTrue(any("الذكاء الاصطناعي" in name for name in rector_team_names))
+        self.assertTrue(any("النظم المدمجة" in name for name in rector_team_names))
+        self.assertFalse(any("الحوسبة السحابية" in name for name in rector_team_names))
+        self.assertFalse(any("ذمار" in name for name in rector_team_names))
+
+        # 7. Login as Ministry Admin -> Sees all 5 teams nationwide
+        res = self.client.post("/api/auth/login", json={"email": "admin@mohesr.gov.ye", "password": "Ministry@2026"})
+        self.assertEqual(res.status_code, 200)
+        min_token = res.json()["token"]
+        min_headers = {"Authorization": f"Bearer {min_token}"}
+
+        res = self.client.get("/api/teams", headers=min_headers)
+        self.assertEqual(res.status_code, 200)
+        self.assertGreaterEqual(len(res.json()["teams"]), 5)
 
 
 if __name__ == "__main__":
