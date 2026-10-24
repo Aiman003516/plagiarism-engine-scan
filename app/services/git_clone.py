@@ -35,13 +35,28 @@ def _clone_git_repo(repo_url: str, branch: str = "main", access_token: Optional[
 
     log(f"🔗 Cloning repository: {repo_url} (branch: {branch})...")
 
-    # Skip Git LFS (Large File Storage) objects to speed up clones
+    # Block SSRF: ensure host is not loopback, link-local, or private RFC1918
+    from urllib.parse import urlparse
+    import ipaddress
+    parsed_url = urlparse(repo_url)
+    hostname = (parsed_url.hostname or "").lower()
+    if not hostname or hostname in {"localhost", "127.0.0.1", "::1", "0.0.0.0", "169.254.169.254"}:
+        raise HTTPException(status_code=400, detail="Cloning from localhost or private network is forbidden")
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local:
+            raise HTTPException(status_code=400, detail="Cloning from private/loopback IP is forbidden")
+    except ValueError:
+        pass
+
+    # Skip Git LFS and disable prompts/symlinks
     env = os.environ.copy()
     env["GIT_LFS_SKIP_SMUDGE"] = "1"
+    env["GIT_TERMINAL_PROMPT"] = "0"
 
     try:
         subprocess.run(
-            ["git", "clone", "--depth", "1", "--branch", branch, "--", clone_url, tmp_dir],
+            ["git", "-c", "core.symlinks=false", "clone", "--depth", "1", "--branch", branch, "--", clone_url, tmp_dir],
             check=True,
             capture_output=True,
             text=True,

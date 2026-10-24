@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Database, Search, RefreshCw, AlertTriangle, ShieldCheck, GitCompare, Eye, X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
@@ -113,7 +113,7 @@ export function PlagiarismAnalysis() {
   const runDeepScan = async (cmp: PlagiarismComparison) => {
     if (!scanResult) return;
     const file2 = cmp.file2 || cmp.matched_file || '';
-    const key = `${cmp.file1}::${file2}`;
+    const key = `${cmp.project}::${cmp.file1}::${file2}`;
 
     if (deepScanResultsCache[key]) {
       setDeepScanResult(deepScanResultsCache[key]);

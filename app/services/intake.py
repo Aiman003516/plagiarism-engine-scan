@@ -78,6 +78,9 @@ def _run_intake(
                 department=metadata.get("department"),
                 year=metadata.get("year"),
                 university=metadata.get("university"),
+                university_id=metadata.get("university_id"),
+                college_id=metadata.get("college_id"),
+                department_id=metadata.get("department_id"),
             )
         except Exception as e:
             log(f"   ℹ️ Metadata update note: {e}")
@@ -135,6 +138,16 @@ def _run_intake(
     log(f"   ✅ {total_fingerprints} fingerprints computed in {round(t1-t0, 1)}s")
 
     log("💾 Storing new fingerprints to database index (batch mode)...")
+    # Clean stale fingerprints for project if re-uploading
+    try:
+        conn = db._get_connection()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM fingerprint_index WHERE project_id = %s;", (project_name,))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
     batch = []
     for f in project_files:
         rel_path = f.get("relative_path", f.get("filename", ""))
@@ -278,7 +291,7 @@ def _run_analysis(
             total_candidates += 1
             sim_val = min(count / min(total_fps, target_fps), 1.0)
             if ftype == "code":
-                if is_small_exact or (sim_val >= 0.15 and count >= 5) or sim_val >= 0.25:
+                if is_small_exact or (count >= min_code_fps and sim_val >= 0.10) or (sim_val >= 0.15 and count >= 5) or sim_val >= 0.25:
                     all_comparisons.append({
                         "project": other_pid,
                         "file1": rel_path,
@@ -490,7 +503,13 @@ def _run_analysis(
             if source_content and target_content:
                 # Get the pre-calculated Semantic Score from pgvector (fast O(1) lookup)
                 sem_key = (rel_path, other_pid, other_path)
-                precalc_semantic_score = semantic_lookup.get(sem_key, 0.0)
+                if sem_key in semantic_lookup:
+                    precalc_semantic_score = semantic_lookup[sem_key]
+                elif hasattr(vstore, "get_pair_similarity"):
+                    precalc_semantic_score = vstore.get_pair_similarity(project_name, rel_path, other_pid, other_path)
+                    semantic_lookup[sem_key] = precalc_semantic_score
+                else:
+                    precalc_semantic_score = 0.0
 
                 # Execute Hybrid Fusion Math
                 fusion_result = compute_fusion_score(

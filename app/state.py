@@ -2,6 +2,7 @@
 
 import os
 import json
+import tempfile
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import threading
@@ -23,13 +24,12 @@ _model_lock = threading.Lock()
 
 
 def _preload_models():
-    """Background preload of ML models so first scan is fast."""
+    """Background preload of ML models actually used (UniXcoder & BGE-M3)."""
     global _models_ready
     try:
         from plagiarism_engine.vector_store import model_pool
-        model_pool.get_model("code")
+        model_pool.get_model("unixcoder")
         model_pool.get_model("bge_m3")
-        model_pool.get_model("minilm")
         _models_ready = True
     except Exception as e:
         print(f"Failed to preload models: {e}")
@@ -102,17 +102,40 @@ def get_vstore() -> VectorStore:
 HISTORY_FILE = DATA_DIR / "scan_history.json"
 
 
+_history_lock = threading.Lock()
+
+
 def _load_history() -> List[Dict[str, Any]]:
-    if HISTORY_FILE.exists():
-        try:
-            return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
-        except Exception as e:
-            backup_path = HISTORY_FILE.with_suffix(f".corrupt.{int(datetime.now().timestamp())}.json")
-            HISTORY_FILE.rename(backup_path)
-            print(f"Failed to load history, backed up corrupted file to {backup_path}: {e}")
-            return []
-    return []
+    with _history_lock:
+        if HISTORY_FILE.exists():
+            try:
+                content = HISTORY_FILE.read_text(encoding="utf-8")
+                if not content.strip():
+                    return []
+                return json.loads(content)
+            except Exception as e:
+                try:
+                    backup_path = HISTORY_FILE.with_suffix(f".corrupt.{int(datetime.now().timestamp())}.json")
+                    HISTORY_FILE.rename(backup_path)
+                    print(f"Failed to load history, backed up corrupted file to {backup_path}: {e}")
+                except Exception:
+                    pass
+                return []
+        return []
 
 
 def _save_history(history: List[Dict[str, Any]]):
-    HISTORY_FILE.write_text(json.dumps(history, indent=2, default=str), encoding="utf-8")
+    with _history_lock:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        temp_fd, temp_path = tempfile.mkstemp(dir=DATA_DIR, prefix="history_tmp_", suffix=".json")
+        try:
+            with open(temp_fd, "w", encoding="utf-8") as f:
+                json.dump(history, f, indent=2, default=str)
+            os.replace(temp_path, HISTORY_FILE)
+        except Exception as e:
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except Exception:
+                pass
+            raise e

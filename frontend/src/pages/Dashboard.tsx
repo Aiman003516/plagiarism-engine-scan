@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import {
   FolderOpen,
@@ -142,8 +142,9 @@ function StatCard({ icon: Icon, label, value, tone, hint, ratio }: StatCardData)
 /** Verdict → badge classes. Literal strings only, so Tailwind extracts them. */
 function verdictBadge(verdict: string): string {
   const v = String(verdict || "").toUpperCase();
-  if (v === "FLAGGED") return "bg-red-500/10 text-red-500 ring-red-500/20";
-  if (v === "REVIEW" || v === "WARNING") return "bg-amber-500/10 text-amber-500 ring-amber-500/20";
+  if (v === "CRITICAL" || v === "FLAGGED") return "bg-red-500/10 text-red-500 ring-red-500/20";
+  if (v === "HIGH" || v === "REVIEW" || v === "WARNING") return "bg-amber-500/10 text-amber-500 ring-amber-500/20";
+  if (v === "LOW") return "bg-blue-500/10 text-blue-500 ring-blue-500/20";
   return "bg-emerald-500/10 text-emerald-500 ring-emerald-500/20";
 }
 
@@ -248,7 +249,7 @@ export default function Dashboard() {
         {
           icon: BarChart3,
           label: "Avg Fusion Score",
-          value: stats.average_fusion_score !== undefined ? `${stats.average_fusion_score}%` : "â€”",
+          value: stats.average_fusion_score !== undefined ? `${stats.average_fusion_score}%` : "—",
           tone: "amber",
         },
       ]

@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { BarChart3, ShieldCheck, Loader2, Search, ChevronLeft, ChevronRight, Filter } from 'lucide-react';
 import type { PlagiarismComparison } from '../../lib/api';
 
@@ -25,8 +25,10 @@ export function ComparisonsTable({
   const [searchQuery, setSearchQuery] = useState('');
 
   const renderWhyBadge = (cmp: PlagiarismComparison) => {
-    if (cmp.embedded_copy || (cmp.containment_score && cmp.containment_score >= 0.8)) {
-      const containmentPct = cmp.containment_score ? `${Math.round(cmp.containment_score * 100)}%` : '>=80%';
+    const rawCont = cmp.containment_score ?? 0;
+    const contPct = rawCont > 1 ? rawCont : rawCont * 100;
+    if (cmp.embedded_copy || contPct >= 80) {
+      const containmentPct = contPct > 0 ? `${Math.round(contPct)}%` : '>=80%';
       return (
         <span
           className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-600 dark:text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20"
@@ -183,7 +185,7 @@ export function ComparisonsTable({
               </thead>
               <tbody className="divide-y divide-border/50 dark:divide-slate-700">
                 {pagedComparisons.map((cmp, i) => {
-                  const scanKey = `${cmp.file1}::${cmp.file2 || cmp.matched_file}`;
+                  const scanKey = `${cmp.project}::${cmp.file1}::${cmp.file2 || cmp.matched_file}`;
                   const isLoadingThis = deepScanLoading === scanKey;
                   const isScanningThis = isLoadingThis || (activeDeepScans ? activeDeepScans.includes(scanKey) : false);
                   const cachedResult = deepScanResultsCache ? deepScanResultsCache[scanKey] : undefined;

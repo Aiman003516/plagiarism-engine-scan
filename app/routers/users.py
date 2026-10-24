@@ -154,6 +154,15 @@ async def create_user_endpoint(
                 detail="University administrators cannot create users for a different university."
             )
         payload.university_id = caller_uni
+        if payload.college_id:
+            conn = db._get_connection()
+            cur = conn.cursor()
+            q = "SELECT university_id FROM colleges WHERE id = %s" if db.mode == "postgresql" else "SELECT university_id FROM colleges WHERE id = ?"
+            cur.execute(q, (payload.college_id,))
+            r = cur.fetchone()
+            conn.close()
+            if not r or r[0] != caller_uni:
+                raise HTTPException(status_code=403, detail="Cannot assign users to a college outside your university.")
 
     # Determine identifier (email or enrollment number for student)
     if payload.role == "student":
@@ -191,13 +200,16 @@ async def create_user_endpoint(
             senum = (payload.enrollment_number or "").strip()
             if db.get_student_by_enrollment_number(senum):
                 return "STUDENT_REGISTERED", None
-            # Insert into students table for team management
+            # Insert into students table for team management with full institutional scope
             db.create_student(
                 id=user_id,
                 enrollment_number=senum,
                 name=name,
                 password_hash=password_hash,
                 requires_password_change=True,
+                college_id=payload.college_id,
+                university_id=payload.university_id,
+                department_id=payload.department_id,
             )
             # Also sync into users table so student can authenticate
             db.create_user(user_id, name, senum, password_hash, "student", payload.college_id)
@@ -257,6 +269,9 @@ async def bulk_import_students(
                     name=name,
                     password_hash=pwd_hash,
                     requires_password_change=True,
+                    college_id=effective_college,
+                    university_id=effective_uni,
+                    department_id=s.department_id,
                 )
                 db.create_user(uid, name, enum, pwd_hash, "student", effective_college)
                 if effective_uni or s.department_id:
@@ -314,6 +329,18 @@ async def update_user_endpoint(
 
     existing = await loop.run_in_executor(None, lambda: db.get_user_by_id(user_id))
     if not existing:
+        student_rec = await loop.run_in_executor(None, lambda: db.get_student_by_id(user_id))
+        if student_rec:
+            existing = {
+                "id": student_rec.get("id"),
+                "name": student_rec.get("name"),
+                "email": student_rec.get("enrollment_number"),
+                "role": "student",
+                "college_id": student_rec.get("college_id"),
+                "university_id": student_rec.get("university_id"),
+                "department_id": student_rec.get("department_id"),
+            }
+    if not existing:
         raise HTTPException(status_code=404, detail="User not found")
 
     caller_role = current_user.get("role")
@@ -329,21 +356,38 @@ async def update_user_endpoint(
     # --- Scope & Role Delegation Guards ----------------------------------
     if caller_role == "college_admin":
         caller_college = caller_record.get("college_id")
+        if current_user["user_id"] == user_id and (payload.college_id is not None or payload.university_id is not None or payload.role is not None):
+            raise HTTPException(status_code=403, detail="Administrators cannot alter their own institutional scope or role.")
         if existing.get("college_id") != caller_college and current_user["user_id"] != user_id:
             raise HTTPException(status_code=403, detail="Insufficient permissions to modify a user from another college.")
         if current_user["user_id"] != user_id and existing.get("role") in ("ministry_admin", "university_admin", "college_admin"):
             raise HTTPException(status_code=403, detail="College administrators cannot modify administrative accounts.")
         if payload.role is not None and payload.role not in ("faculty", "student"):
             raise HTTPException(status_code=403, detail="College administrators can only assign faculty or student roles.")
+        if payload.college_id is not None and payload.college_id != caller_college:
+            raise HTTPException(status_code=403, detail="College administrators cannot assign users to other colleges.")
+        if payload.university_id is not None:
+            raise HTTPException(status_code=403, detail="College administrators cannot modify university assignment.")
 
     elif caller_role == "university_admin":
         caller_uni = caller_record.get("university_id")
+        if current_user["user_id"] == user_id and (payload.university_id is not None or payload.role is not None):
+            raise HTTPException(status_code=403, detail="Administrators cannot alter their own university scope or role.")
         if existing.get("university_id") and caller_uni and existing.get("university_id") != caller_uni:
             raise HTTPException(status_code=403, detail="Insufficient permissions to modify a user from another university.")
         if current_user["user_id"] != user_id and existing.get("role") in ("ministry_admin", "university_admin"):
             raise HTTPException(status_code=403, detail="University administrators cannot modify ministry or university administrator accounts.")
         if payload.role is not None and payload.role in ("ministry_admin", "university_admin"):
             raise HTTPException(status_code=403, detail="University administrators cannot promote users to ministry or university administrator.")
+        if payload.college_id is not None:
+            conn = db._get_connection()
+            cur = conn.cursor()
+            q = "SELECT university_id FROM colleges WHERE id = %s" if db.mode == "postgresql" else "SELECT university_id FROM colleges WHERE id = ?"
+            cur.execute(q, (payload.college_id,))
+            r = cur.fetchone()
+            conn.close()
+            if not r or r[0] != caller_uni:
+                raise HTTPException(status_code=403, detail="Cannot assign a user to a college outside your university.")
 
     def _update():
         if payload.email is not None:
@@ -394,6 +438,18 @@ async def delete_user_endpoint(
     db = get_db()
     loop = asyncio.get_running_loop()
     existing = await loop.run_in_executor(None, lambda: db.get_user_by_id(user_id))
+    if not existing:
+        student_rec = await loop.run_in_executor(None, lambda: db.get_student_by_id(user_id))
+        if student_rec:
+            existing = {
+                "id": student_rec.get("id"),
+                "name": student_rec.get("name"),
+                "email": student_rec.get("enrollment_number"),
+                "role": "student",
+                "college_id": student_rec.get("college_id"),
+                "university_id": student_rec.get("university_id"),
+                "department_id": student_rec.get("department_id"),
+            }
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
 

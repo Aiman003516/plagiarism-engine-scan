@@ -135,10 +135,17 @@ async def create_team(payload: TeamCreate, current_user: dict = Depends(require_
     return team
 
 
-@router.get("/api/teams/{team_id}", dependencies=[Depends(require_role())])
-async def get_team(team_id: str):
+@router.get("/api/teams/{team_id}")
+async def get_team(team_id: str, current_user: dict = Depends(require_role())):
     db = get_db()
     loop = asyncio.get_running_loop()
+
+    caller_role = current_user.get("role")
+    if caller_role == "student":
+        caller_id = current_user.get("user_id")
+        student_rec = await loop.run_in_executor(None, lambda: db.get_student_by_id(caller_id)) or {}
+        if student_rec.get("team_id") != team_id:
+            raise HTTPException(status_code=403, detail="Students can only view their own team.")
 
     def _get():
         team = db.get_team_by_id(team_id)
@@ -169,6 +176,16 @@ async def update_team(team_id: str, payload: TeamUpdate, current_user: dict = De
         if caller_role in ("college_admin", "faculty"):
             caller_college = caller_record.get("college_id")
             if team_college and caller_college and team_college != caller_college:
+                return None, "FORBIDDEN"
+        elif caller_role == "university_admin":
+            caller_uni = caller_record.get("university_id")
+            conn = db._get_connection()
+            cur = conn.cursor()
+            q = "SELECT university_id FROM colleges WHERE id = %s" if db.mode == "postgresql" else "SELECT university_id FROM colleges WHERE id = ?"
+            cur.execute(q, (team_college,))
+            r = cur.fetchone()
+            conn.close()
+            if not r or r[0] != caller_uni:
                 return None, "FORBIDDEN"
 
         db.update_team(team_id, name=payload.name)
@@ -283,6 +300,16 @@ async def add_team_member_endpoint(team_id: str, payload: TeamMemberAdd, current
             caller_college = caller_record.get("college_id")
             if team_college and caller_college and team_college != caller_college:
                 return "FORBIDDEN", None
+        elif caller_role == "university_admin":
+            caller_uni = caller_record.get("university_id")
+            conn = db._get_connection()
+            cur = conn.cursor()
+            q = "SELECT university_id FROM colleges WHERE id = %s" if db.mode == "postgresql" else "SELECT university_id FROM colleges WHERE id = ?"
+            cur.execute(q, (team_college,))
+            r = cur.fetchone()
+            conn.close()
+            if not r or r[0] != caller_uni:
+                return "FORBIDDEN", None
 
         student = db.get_student_by_enrollment_number(payload.enrollment_number)
         if not student:
@@ -290,6 +317,9 @@ async def add_team_member_endpoint(team_id: str, payload: TeamMemberAdd, current
 
         if caller_role in ("college_admin", "faculty"):
             if student.get("college_id") and team_college and student.get("college_id") != team_college:
+                return "CROSS_COLLEGE_STUDENT", None
+        elif caller_role == "university_admin":
+            if student.get("university_id") and caller_uni and student.get("university_id") != caller_uni:
                 return "CROSS_COLLEGE_STUDENT", None
 
         db.add_team_member(team_id, student["id"])
@@ -307,8 +337,8 @@ async def add_team_member_endpoint(team_id: str, payload: TeamMemberAdd, current
     return {"members": members}
 
 
-@router.delete("/api/teams/{team_id}/members/{student_id}", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
-async def remove_team_member_endpoint(team_id: str, student_id: str):
+@router.delete("/api/teams/{team_id}/members/{student_id}")
+async def remove_team_member_endpoint(team_id: str, student_id: str, current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))):
     db = get_db()
     loop = asyncio.get_running_loop()
 
@@ -316,6 +346,25 @@ async def remove_team_member_endpoint(team_id: str, student_id: str):
         team = db.get_team_by_id(team_id)
         if not team:
             return "TEAM_NOT_FOUND"
+
+        caller_role = current_user.get("role")
+        caller_record = db.get_user_by_id(current_user["user_id"]) or {}
+        team_college = team.get("college_id")
+        if caller_role in ("college_admin", "faculty"):
+            caller_college = caller_record.get("college_id")
+            if team_college and caller_college and team_college != caller_college:
+                return "FORBIDDEN"
+        elif caller_role == "university_admin":
+            caller_uni = caller_record.get("university_id")
+            conn = db._get_connection()
+            cur = conn.cursor()
+            q = "SELECT university_id FROM colleges WHERE id = %s" if db.mode == "postgresql" else "SELECT university_id FROM colleges WHERE id = ?"
+            cur.execute(q, (team_college,))
+            r = cur.fetchone()
+            conn.close()
+            if not r or r[0] != caller_uni:
+                return "FORBIDDEN"
+
         members = db.get_team_members(team_id)
         if not any(m["id"] == student_id for m in members):
             return "NOT_MEMBER"
@@ -325,6 +374,8 @@ async def remove_team_member_endpoint(team_id: str, student_id: str):
     status = await loop.run_in_executor(None, _remove)
     if status == "TEAM_NOT_FOUND":
         raise HTTPException(status_code=404, detail="Team not found")
+    if status == "FORBIDDEN":
+        raise HTTPException(status_code=403, detail="Insufficient permissions to modify a team from another institution.")
     if status == "NOT_MEMBER":
         raise HTTPException(status_code=404, detail="Student is not a member of this team")
     return {"detail": "Student removed from team"}

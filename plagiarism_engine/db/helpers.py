@@ -40,13 +40,24 @@ def compress_text(text: str) -> str:
     except Exception:
         return text
 
-def decompress_text(b64_text: str) -> str:
-    if not b64_text:
+def decompress_text(data: Any) -> str:
+    if not data:
         return ""
+    if isinstance(data, (bytes, bytearray, memoryview)):
+        raw_bytes = bytes(data)
+        try:
+            return zlib.decompress(raw_bytes).decode('utf-8', errors='replace')
+        except Exception:
+            try:
+                return zlib.decompress(base64.b64decode(raw_bytes)).decode('utf-8', errors='replace')
+            except Exception:
+                return raw_bytes.decode('utf-8', errors='replace')
+    s = str(data)
     try:
-        return zlib.decompress(base64.b64decode(b64_text.encode('utf-8'))).decode('utf-8')
+        decoded_bytes = base64.b64decode(s.encode('utf-8'))
+        return zlib.decompress(decoded_bytes).decode('utf-8', errors='replace')
     except Exception:
-        return b64_text
+        return s
 
 def _as_bool_flag(val: Any) -> int:
     """Normalize driver-specific boolean representations (bool/int/str) to 0/1."""

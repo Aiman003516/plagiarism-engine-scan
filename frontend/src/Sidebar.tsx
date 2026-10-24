@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { clearAllSessionCaches } from "./lib/api";
 import {
   UploadCloud,
   Search,
@@ -142,11 +143,7 @@ function Sidebar() {
       <div className="p-2 md:p-4 border-t border-border shrink-0">
         <button
           onClick={() => {
-            localStorage.removeItem("auth_token");
-            // Also drop the cached profile so no PII lingers on shared machines
-            // (mirrors the 401 handler in lib/api.ts).
-            localStorage.removeItem("user_data");
-            localStorage.removeItem("plagiarism-scan-storage");
+            clearAllSessionCaches();
             try {
               useScanStore.getState().resetAll();
             } catch {}

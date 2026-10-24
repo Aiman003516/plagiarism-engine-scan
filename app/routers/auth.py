@@ -126,7 +126,7 @@ async def login(payload: LoginRequest):
 
 
 @router.get("/api/auth/me")
-async def auth_me(current_user: dict = Depends(require_role())):
+async def auth_me(current_user: dict = Depends(require_role(allow_password_change_pending=True))):
     db = get_db()
     user = db.get_user_by_id(current_user["user_id"])
     if user:
@@ -173,7 +173,7 @@ async def auth_me(current_user: dict = Depends(require_role())):
 @router.post("/api/auth/change-password")
 async def change_password(
     payload: ChangePasswordRequest,
-    current_user: dict = Depends(require_role()),
+    current_user: dict = Depends(require_role(allow_password_change_pending=True)),
 ):
     """
     Rotate the caller's own password. Works for both staff/admin accounts

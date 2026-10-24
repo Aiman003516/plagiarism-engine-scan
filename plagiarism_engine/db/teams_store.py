@@ -42,11 +42,40 @@ class TeamsStoreMixin:
             if college_id:
                 cid = clean_str(college_id)
                 if self.mode == "postgresql":
-                    cur.execute("SELECT id, name, college_id, created_at, COALESCE(submission_allowed, FALSE) FROM teams WHERE college_id = %s ORDER BY created_at DESC;", (cid,))
+                    cur.execute("""
+                        SELECT t.id, t.name, t.college_id, t.created_at, COALESCE(t.submission_allowed, FALSE), COUNT(s.id) AS member_count
+                        FROM teams t
+                        LEFT JOIN students s ON s.team_id = t.id
+                        WHERE t.college_id = %s
+                        GROUP BY t.id, t.name, t.college_id, t.created_at, t.submission_allowed
+                        ORDER BY t.created_at DESC;
+                    """, (cid,))
                 else:
-                    cur.execute("SELECT id, name, college_id, created_at, COALESCE(submission_allowed, 0) FROM teams WHERE college_id = ? ORDER BY created_at DESC;", (cid,))
+                    cur.execute("""
+                        SELECT t.id, t.name, t.college_id, t.created_at, COALESCE(t.submission_allowed, 0), COUNT(s.id) AS member_count
+                        FROM teams t
+                        LEFT JOIN students s ON s.team_id = t.id
+                        WHERE t.college_id = ?
+                        GROUP BY t.id, t.name, t.college_id, t.created_at, t.submission_allowed
+                        ORDER BY t.created_at DESC;
+                    """, (cid,))
             else:
-                cur.execute("SELECT id, name, college_id, created_at, COALESCE(submission_allowed, FALSE) FROM teams ORDER BY created_at DESC;")
+                if self.mode == "postgresql":
+                    cur.execute("""
+                        SELECT t.id, t.name, t.college_id, t.created_at, COALESCE(t.submission_allowed, FALSE), COUNT(s.id) AS member_count
+                        FROM teams t
+                        LEFT JOIN students s ON s.team_id = t.id
+                        GROUP BY t.id, t.name, t.college_id, t.created_at, t.submission_allowed
+                        ORDER BY t.created_at DESC;
+                    """)
+                else:
+                    cur.execute("""
+                        SELECT t.id, t.name, t.college_id, t.created_at, COALESCE(t.submission_allowed, 0), COUNT(s.id) AS member_count
+                        FROM teams t
+                        LEFT JOIN students s ON s.team_id = t.id
+                        GROUP BY t.id, t.name, t.college_id, t.created_at, t.submission_allowed
+                        ORDER BY t.created_at DESC;
+                    """)
             rows = cur.fetchall()
 
             teams = []
@@ -54,6 +83,7 @@ class TeamsStoreMixin:
                 if isinstance(r, dict) or hasattr(r, 'keys'):
                     d = dict(r)
                     d["submission_allowed"] = bool(d.get("submission_allowed", False))
+                    d["member_count"] = int(d.get("member_count") or 0)
                     teams.append(d)
                 else:
                     teams.append({
@@ -62,6 +92,7 @@ class TeamsStoreMixin:
                         "college_id": r[2],
                         "created_at": r[3],
                         "submission_allowed": bool(r[4]) if len(r) > 4 else False,
+                        "member_count": int(r[5]) if len(r) > 5 else 0,
                     })
             return teams
         finally:

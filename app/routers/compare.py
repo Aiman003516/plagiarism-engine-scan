@@ -285,7 +285,7 @@ async def compare_direct_files(
                     if row:
                         from plagiarism_engine.db.helpers import decompress_text
                         raw_c = row[0]
-                        content_str = decompress_text(raw_c) if isinstance(raw_c, (bytes, bytearray, memoryview)) else (raw_c or "")
+                        content_str = decompress_text(raw_c)
                         return content_str, row[1] or file_type_for(file_path) or "text", f"{project_id} : {file_path}"
                 except Exception:
                     pass
@@ -316,18 +316,26 @@ async def compare_direct_files(
         from plagiarism_engine.vector_store import model_pool, DOMAIN_MODEL_KEYS
         from plagiarism_engine.vectors.pgvector_store import PgVectorStore
         from plagiarism_engine.text_detector import normalize_arabic_text
+        from plagiarism_engine.fusion_scorer import calibrate_semantic
 
         domain_key = DOMAIN_MODEL_KEYS.get(eff_type, "bge_m3")
-        model, _ = model_pool.get_model_with_name(domain_key)
+        model, model_name = model_pool.get_model_with_name(domain_key)
         if model is not None:
             text_a = normalize_arabic_text(content_a[:2500]) if eff_type == "text" else content_a[:2500]
             text_b = normalize_arabic_text(content_b[:2500]) if eff_type == "text" else content_b[:2500]
-            emb_a = model.encode(text_a, convert_to_numpy=True)
-            emb_b = model.encode(text_b, convert_to_numpy=True)
+            loop = asyncio.get_running_loop()
+            emb_a, emb_b = await loop.run_in_executor(
+                None,
+                lambda: (
+                    model.encode(text_a, convert_to_numpy=True),
+                    model.encode(text_b, convert_to_numpy=True),
+                )
+            )
             vec_a = PgVectorStore._normalize_and_pad_1d(emb_a, 1024)
             vec_b = PgVectorStore._normalize_and_pad_1d(emb_b, 1024)
             raw_cosine = float(np.dot(vec_a, vec_b))
-            semantic_score = float(max(0.0, min(1.0, raw_cosine)))
+            calibrated = calibrate_semantic(raw_cosine, model_name)
+            semantic_score = float(max(0.0, min(1.0, calibrated)))
     except Exception as e:
         print(f"Warning computing direct file comparison semantic score: {e}")
 

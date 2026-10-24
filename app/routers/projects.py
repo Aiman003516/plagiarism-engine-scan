@@ -33,6 +33,7 @@ async def list_projects(limit: int = 1000, page: int = 1, current_user: dict = D
 
     caller_college = caller_record.get("college_id")
     caller_uni = caller_record.get("university_id")
+    caller_team = caller_record.get("team_id")
 
     for project in projects:
         item = dict(project)
@@ -45,24 +46,24 @@ async def list_projects(limit: int = 1000, page: int = 1, current_user: dict = D
         proj_uni = item.get("university_id")
 
         if caller_role == "student":
-            if item.get("student_id") != caller_id and item.get("submitted_by_student_id") != caller_id:
+            is_author = (item.get("student_id") == caller_id or item.get("submitted_by_student_id") == caller_id)
+            is_teammate = bool(caller_team and item.get("team_id") == caller_team)
+            if not (is_author or is_teammate):
                 continue
 
         elif caller_role in ("college_admin", "faculty"):
-            if proj_status == "pending_review":
-                if proj_college and caller_college and proj_college != caller_college:
+            if proj_status in ("pending_review", "rejected"):
+                if caller_college and proj_college and proj_college != caller_college:
                     continue
-            else:
-                if proj_college and caller_college and proj_college != caller_college:
-                    continue
+            elif caller_college and proj_college and proj_college != caller_college:
+                continue
 
         elif caller_role == "university_admin":
-            if proj_status == "pending_review":
-                if proj_uni and caller_uni and proj_uni != caller_uni:
+            if proj_status in ("pending_review", "rejected"):
+                if caller_uni and proj_uni and proj_uni != caller_uni:
                     continue
-            else:
-                if proj_uni and caller_uni and proj_uni != caller_uni:
-                    continue
+            elif caller_uni and proj_uni and proj_uni != caller_uni:
+                continue
 
         if item.get("abstract"):
             item["abstract"] = decompress_text(item["abstract"])
@@ -93,10 +94,22 @@ async def update_project(project_id: str, payload: ProjectUpdate, current_user: 
     caller_role = current_user.get("role")
     caller_id = current_user.get("user_id")
     if caller_role == "student":
-        if existing.get("student_id") != caller_id:
+        if existing.get("student_id") != caller_id and existing.get("submitted_by_student_id") != caller_id:
             raise HTTPException(status_code=403, detail="You can only edit your own project.")
-        if payload.status and payload.status != "pending":
-            raise HTTPException(status_code=403, detail="Students cannot approve their own projects.")
+        if existing.get("status") in ("approved", "rejected"):
+            raise HTTPException(status_code=400, detail="Cannot edit proposal once it has been approved or rejected. Contact your supervisor to request changes.")
+        if payload.status and payload.status != "pending_review":
+            raise HTTPException(status_code=403, detail="Students cannot alter project status.")
+    elif caller_role in ("college_admin", "faculty"):
+        caller_rec = await loop.run_in_executor(None, lambda: db.get_user_by_id(caller_id)) or {}
+        caller_college = caller_rec.get("college_id")
+        if caller_college and existing.get("college_id") and existing.get("college_id") != caller_college:
+            raise HTTPException(status_code=403, detail="Cannot edit projects belonging to another college.")
+    elif caller_role == "university_admin":
+        caller_rec = await loop.run_in_executor(None, lambda: db.get_user_by_id(caller_id)) or {}
+        caller_uni = caller_rec.get("university_id")
+        if caller_uni and existing.get("university_id") and existing.get("university_id") != caller_uni:
+            raise HTTPException(status_code=403, detail="Cannot edit projects belonging to another university.")
 
     def _update():
         fields = {
@@ -132,11 +145,25 @@ async def update_project(project_id: str, payload: ProjectUpdate, current_user: 
     return updated
 
 
-@router.post("/api/plagiarism/projects/{project_id}/approve", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
-async def approve_project(project_id: str):
+@router.post("/api/plagiarism/projects/{project_id}/approve")
+async def approve_project(project_id: str, current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))):
     """Faculty approval workflow: flip a pending project's status to 'approved'."""
     db = get_db()
     loop = asyncio.get_running_loop()
+    existing = await loop.run_in_executor(None, lambda: db.get_project_by_id(project_id))
+    if not existing:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    caller_role = current_user.get("role")
+    caller_rec = await loop.run_in_executor(None, lambda: db.get_user_by_id(current_user["user_id"])) or {}
+    if caller_role in ("college_admin", "faculty"):
+        caller_college = caller_rec.get("college_id")
+        if caller_college and existing.get("college_id") and existing.get("college_id") != caller_college:
+            raise HTTPException(status_code=403, detail="Cannot approve projects belonging to another college.")
+    elif caller_role == "university_admin":
+        caller_uni = caller_rec.get("university_id")
+        if caller_uni and existing.get("university_id") and existing.get("university_id") != caller_uni:
+            raise HTTPException(status_code=403, detail="Cannot approve projects belonging to another university.")
 
     def _approve():
         conn = db._get_connection()
@@ -213,9 +240,9 @@ async def student_submit_proposal(payload: StudentSubmitRequest, current_user: d
         db.save_project(project_id, title, [])
 
         # 2. Update with academic metadata and student attribution
-        dept = payload.department or student.get("department_id") or "Computer Engineering"
+        dept = payload.department or student.get("department_id") or "Artificial Intelligence"
         yr = payload.year or datetime.now().year
-        uni = payload.university or "Baghdad University"
+        uni = payload.university or student.get("university") or "Sana'a University"
 
         fields = {
             "title": title,
@@ -342,20 +369,44 @@ async def delete_project(project_id: str, current_user: dict = Depends(require_r
     return {"detail": "Project deleted"}
 
 
-@router.get("/api/plagiarism/projects/{project_id}/files", dependencies=[Depends(require_role())])
-async def list_project_files(project_id: str, include_content: bool = False):
+@router.get("/api/plagiarism/projects/{project_id}/files")
+async def list_project_files(project_id: str, include_content: bool = False, current_user: dict = Depends(require_role())):
     db = get_db()
     loop = asyncio.get_running_loop()
     existing = await loop.run_in_executor(None, lambda: db.get_project_by_id(project_id))
     if not existing:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    if include_content:
+        caller_role = current_user.get("role")
+        caller_id = current_user.get("user_id")
+        if caller_role == "student":
+            student_rec = await loop.run_in_executor(None, lambda: db.get_student_by_id(caller_id)) or {}
+            caller_team = student_rec.get("team_id")
+            is_author = (existing.get("student_id") == caller_id or existing.get("submitted_by_student_id") == caller_id)
+            is_teammate = bool(caller_team and existing.get("team_id") == caller_team)
+            if not (is_author or is_teammate):
+                raise HTTPException(status_code=403, detail="Students cannot download code files of other projects.")
+        elif caller_role in ("college_admin", "faculty"):
+            caller_rec = await loop.run_in_executor(None, lambda: db.get_user_by_id(caller_id)) or {}
+            caller_col = caller_rec.get("college_id")
+            if caller_col and existing.get("college_id") and existing.get("college_id") != caller_col:
+                if existing.get("status") == "pending_review":
+                    raise HTTPException(status_code=403, detail="Cannot access confidential proposal files from another college.")
+        elif caller_role == "university_admin":
+            caller_rec = await loop.run_in_executor(None, lambda: db.get_user_by_id(caller_id)) or {}
+            caller_uni = caller_rec.get("university_id")
+            if caller_uni and existing.get("university_id") and existing.get("university_id") != caller_uni:
+                if existing.get("status") == "pending_review":
+                    raise HTTPException(status_code=403, detail="Cannot access confidential proposal files from another university.")
+
     files = await loop.run_in_executor(
         None, lambda: db.get_project_files(project_id, include_content=include_content)
     )
     return {"files": files}
 
 @router.post("/api/plagiarism/projects/{project_id}/index-embeddings")
-async def index_project_embeddings(project_id: str, user=Depends(require_role("ministry_admin", "college_admin", "faculty"))):
+async def index_project_embeddings(project_id: str, user=Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))):
     """On-demand Deep Scan indexer: generate a project's embeddings and store them in PostgreSQL.
 
     Uploads no longer build the vector index (see ``_run_intake``), so this
@@ -367,8 +418,21 @@ async def index_project_embeddings(project_id: str, user=Depends(require_role("m
         raise HTTPException(status_code=400, detail="Missing 'project_id' in the request path.")
 
     db_store = get_db()
-    if not db_store.get_project_by_id(pid):
+    proj = db_store.get_project_by_id(pid)
+    if not proj:
         raise HTTPException(status_code=404, detail=f"Project '{pid}' not found in database")
+
+    caller_role = user.get("role")
+    if caller_role in ("college_admin", "faculty"):
+        caller_rec = db_store.get_user_by_id(user.get("user_id")) or {}
+        caller_col = caller_rec.get("college_id")
+        if caller_col and proj.get("college_id") and proj.get("college_id") != caller_col:
+            raise HTTPException(status_code=403, detail="Cannot index embeddings for a project from another college.")
+    elif caller_role == "university_admin":
+        caller_rec = db_store.get_user_by_id(user.get("user_id")) or {}
+        caller_uni = caller_rec.get("university_id")
+        if caller_uni and proj.get("university_id") and proj.get("university_id") != caller_uni:
+            raise HTTPException(status_code=403, detail="Cannot index embeddings for a project from another university.")
 
     vstore = get_vstore()
     print(
@@ -392,7 +456,7 @@ async def index_project_embeddings(project_id: str, user=Depends(require_role("m
 
 
 @router.get("/api/plagiarism/projects/check")
-async def check_projects(names: str):
+async def check_projects(names: str, current_user: dict = Depends(require_role())):
     name_list = [n.strip() for n in names.split(",") if n.strip()]
     db = get_db()
     loop = asyncio.get_running_loop()
@@ -452,19 +516,21 @@ async def semantic_project_search(payload: SemanticSearchRequest):
             cur = conn.cursor()
             project_hits = {}
 
-            # Helper for lexical token matching score
+            # Helper for lexical token matching score (exact word-boundary token matching)
             def _calc_lexical_score(text_corpus: str) -> float:
                 if not text_corpus or not query_words:
                     return 0.0
                 norm_corpus = normalize_arabic_text(text_corpus).lower()
-                hits = sum(1 for w in query_words if w in norm_corpus)
+                corpus_words = set(re.findall(r'[\w\u0600-\u06FF]+', norm_corpus))
+                hits = sum(1 for w in query_words if w in corpus_words)
                 return min(1.0, hits / max(1, len(query_words)))
 
             # 1. Match against pre-computed project abstract embeddings and metadata
+            # Only match approved projects to protect confidential unapproved proposals
             sql_p = """
                 SELECT id, name, title, abstract, department, year, university, status, abstract_embedding, review_notes
                 FROM projects
-                WHERE 1=1
+                WHERE (status NOT IN ('pending', 'pending_review', 'rejected') OR status IS NULL)
             """
             params_p = []
             if payload.department:
@@ -530,7 +596,6 @@ async def semantic_project_search(payload: SemanticSearchRequest):
                         "year": yr,
                         "university": uni,
                         "status": status,
-                        "review_notes": review_notes,
                         "similarity": round(hybrid_score, 4),
                         "similarity_raw": round(raw_cosine, 4),
                         "similarity_percent": round(hybrid_score * 100, 1),
@@ -542,10 +607,11 @@ async def semantic_project_search(payload: SemanticSearchRequest):
             # 2. Match against project documentation files with pre-stored embeddings
             sql_files = """
                 SELECT pf.project_id, pf.relative_path, pf.embedding, pf.embedding_model,
-                       p.name, p.title, p.abstract, p.department, p.year, p.university, p.status, p.review_notes
+                       p.name, p.title, p.abstract, p.department, p.year, p.university, p.status
                 FROM project_files pf
                 JOIN projects p ON p.id = pf.project_id
                 WHERE pf.file_type = 'text' AND pf.embedding IS NOT NULL
+                  AND (p.status NOT IN ('pending', 'pending_review', 'rejected') OR p.status IS NULL)
             """
             params_f = []
             if payload.department:
@@ -571,7 +637,6 @@ async def semantic_project_search(payload: SemanticSearchRequest):
                 yr = r[8]
                 uni = r[9]
                 status = r[10] or "approved"
-                review_notes = r[11] if len(r) > 11 else None
 
                 emb = PgVectorStore._parse_embedding(emb_raw)
                 if emb is None:
@@ -605,7 +670,6 @@ async def semantic_project_search(payload: SemanticSearchRequest):
                             "year": yr,
                             "university": uni,
                             "status": status,
-                            "review_notes": review_notes,
                             "similarity": round(hybrid_score, 4),
                             "similarity_raw": round(raw_cosine, 4),
                             "similarity_percent": round(hybrid_score * 100, 1),

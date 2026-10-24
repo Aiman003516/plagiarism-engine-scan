@@ -1,4 +1,4 @@
-﻿"""User accounts (JWT/RBAC) and student accounts."""
+"""User accounts (JWT/RBAC) and student accounts."""
 
 from typing import List, Dict, Any, Optional
 
@@ -84,7 +84,21 @@ class UsersStoreMixin:
         if user:
             mapped = dict(user)
             mapped["requires_password_change"] = _as_bool_flag(mapped.get("requires_password_change"))
-            mapped["is_student"] = False
+            if mapped.get("role") == "student":
+                mapped["is_student"] = True
+                # Hydrate student details from students table (team_id, enrollment_number)
+                std_rec = self.get_student_credentials_by_enrollment_number(ident) or self.get_student_by_id(mapped.get("id"))
+                if std_rec:
+                    mapped["enrollment_number"] = std_rec.get("enrollment_number", ident)
+                    mapped["team_id"] = std_rec.get("team_id")
+                    if not mapped.get("college_id"):
+                        mapped["college_id"] = std_rec.get("college_id")
+                    if not mapped.get("university_id"):
+                        mapped["university_id"] = std_rec.get("university_id")
+                    if not mapped.get("department_id"):
+                        mapped["department_id"] = std_rec.get("department_id")
+            else:
+                mapped["is_student"] = False
             return mapped
 
         # 2) Student accounts keyed by enrollment_number
@@ -101,6 +115,8 @@ class UsersStoreMixin:
             "password_hash": student.get("password_hash"),
             "role": "student",
             "college_id": student.get("college_id"),
+            "university_id": student.get("university_id"),
+            "department_id": student.get("department_id"),
             "team_id": student.get("team_id"),
             "requires_password_change": _as_bool_flag(student.get("requires_password_change")),
             "is_student": True,
@@ -195,21 +211,40 @@ class UsersStoreMixin:
             conn.close()
 
     def delete_user(self, id: str) -> None:
-        """Delete a user account by id."""
+        """Delete a user account by id, syncing deletion across both users and students."""
         conn = self._get_connection()
         try:
             cur = conn.cursor()
             uid = clean_str(id)
             if self.mode == "postgresql":
                 cur.execute("DELETE FROM users WHERE id = %s;", (uid,))
+                cur.execute("DELETE FROM students WHERE id = %s;", (uid,))
             else:
                 cur.execute("DELETE FROM users WHERE id = ?;", (uid,))
+                cur.execute("DELETE FROM students WHERE id = ?;", (uid,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def delete_student(self, id: str) -> None:
+        """Delete a student account by id or enrollment number."""
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor()
+            sid = clean_str(id)
+            if self.mode == "postgresql":
+                cur.execute("DELETE FROM students WHERE id = %s OR enrollment_number = %s;", (sid, sid))
+                cur.execute("DELETE FROM users WHERE id = %s OR email = %s;", (sid, sid))
+            else:
+                cur.execute("DELETE FROM students WHERE id = ? OR enrollment_number = ?;", (sid, sid))
+                cur.execute("DELETE FROM users WHERE id = ? OR email = ?;", (sid, sid))
             conn.commit()
         finally:
             conn.close()
 
     def create_student(self, id: str, enrollment_number: str, name: str, password_hash: str,
-                       requires_password_change: bool = True) -> None:
+                       requires_password_change: bool = True, college_id: Optional[str] = None,
+                       university_id: Optional[str] = None, department_id: Optional[str] = None) -> None:
         """
         Insert a new student account keyed by enrollment_number.
 
@@ -227,18 +262,25 @@ class UsersStoreMixin:
             sph = clean_str(password_hash)
             sflag_int = _as_bool_flag(requires_password_change)
             sflag = bool(sflag_int) if self.mode == "postgresql" else sflag_int
+            scol = clean_str(college_id) if college_id else None
+            suni = clean_str(university_id) if university_id else None
+            sdept = clean_str(department_id) if department_id else None
 
             if self.mode == "postgresql":
                 cur.execute("""
-                    INSERT INTO students (id, enrollment_number, name, password_hash, requires_password_change)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO NOTHING;
-                """, (sid, senum, sname, sph, sflag))
+                    INSERT INTO students (id, enrollment_number, name, password_hash, requires_password_change, college_id, university_id, department_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        college_id = COALESCE(EXCLUDED.college_id, students.college_id),
+                        university_id = COALESCE(EXCLUDED.university_id, students.university_id),
+                        department_id = COALESCE(EXCLUDED.department_id, students.department_id);
+                """, (sid, senum, sname, sph, sflag, scol, suni, sdept))
             else:
                 cur.execute("""
-                    INSERT OR IGNORE INTO students (id, enrollment_number, name, password_hash, requires_password_change)
-                    VALUES (?, ?, ?, ?, ?);
-                """, (sid, senum, sname, sph, sflag))
+                    INSERT OR REPLACE INTO students (id, enrollment_number, name, password_hash, requires_password_change, college_id, university_id, department_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                """, (sid, senum, sname, sph, sflag, scol, suni, sdept))
             conn.commit()
         finally:
             conn.close()
@@ -250,10 +292,11 @@ class UsersStoreMixin:
         try:
             cur = conn.cursor()
             enum = clean_str(enrollment_number)
+            cols = "id, enrollment_number, name, college_id, team_id, created_at, university_id, department_id"
             if self.mode == "postgresql":
-                cur.execute("SELECT id, enrollment_number, name, college_id, team_id, created_at FROM students WHERE enrollment_number = %s;", (enum,))
+                cur.execute(f"SELECT {cols} FROM students WHERE enrollment_number = %s;", (enum,))
             else:
-                cur.execute("SELECT id, enrollment_number, name, college_id, team_id, created_at FROM students WHERE enrollment_number = ?;", (enum,))
+                cur.execute(f"SELECT {cols} FROM students WHERE enrollment_number = ?;", (enum,))
             row = cur.fetchone()
             if not row:
                 return None
@@ -262,6 +305,8 @@ class UsersStoreMixin:
             return {
                 "id": row[0], "enrollment_number": row[1], "name": row[2],
                 "college_id": row[3], "team_id": row[4], "created_at": row[5],
+                "university_id": row[6] if len(row) > 6 else None,
+                "department_id": row[7] if len(row) > 7 else None,
             }
         finally:
             conn.close()
@@ -276,7 +321,7 @@ class UsersStoreMixin:
             cur = conn.cursor()
             enum = clean_str(enrollment_number).strip()
             cols = ("id, enrollment_number, name, password_hash, requires_password_change, "
-                    "college_id, team_id, created_at")
+                    "college_id, team_id, created_at, university_id, department_id")
             if self.mode == "postgresql":
                 cur.execute(f"SELECT {cols} FROM students WHERE enrollment_number = %s;", (enum,))
             else:
@@ -290,6 +335,8 @@ class UsersStoreMixin:
                 "id": row[0], "enrollment_number": row[1], "name": row[2],
                 "password_hash": row[3], "requires_password_change": row[4],
                 "college_id": row[5], "team_id": row[6], "created_at": row[7],
+                "university_id": row[8] if len(row) > 8 else None,
+                "department_id": row[9] if len(row) > 9 else None,
             }
         finally:
             conn.close()
@@ -301,7 +348,7 @@ class UsersStoreMixin:
             cur = conn.cursor()
             sid = clean_str(id)
             cols = ("id, enrollment_number, name, password_hash, requires_password_change, "
-                    "college_id, team_id, created_at")
+                    "college_id, team_id, created_at, university_id, department_id")
             if self.mode == "postgresql":
                 cur.execute(f"SELECT {cols} FROM students WHERE id = %s;", (sid,))
             else:
@@ -315,17 +362,19 @@ class UsersStoreMixin:
                 "id": row[0], "enrollment_number": row[1], "name": row[2],
                 "password_hash": row[3], "requires_password_change": row[4],
                 "college_id": row[5], "team_id": row[6], "created_at": row[7],
+                "university_id": row[8] if len(row) > 8 else None,
+                "department_id": row[9] if len(row) > 9 else None,
             }
         finally:
             conn.close()
 
     def update_student(self, id: str, **fields) -> None:
-        """Update a subset of fields on a student record (password rotation, flags)."""
+        """Update a subset of fields on a student record (password rotation, flags, scope)."""
         conn = self._get_connection()
         try:
             cur = conn.cursor()
             allowed = {"name", "enrollment_number", "password_hash", "requires_password_change",
-                       "college_id", "team_id"}
+                       "college_id", "team_id", "university_id", "department_id"}
             updates = {}
             for key, value in fields.items():
                 if key in allowed and value is not None:
@@ -337,14 +386,13 @@ class UsersStoreMixin:
             if not updates:
                 return
 
-            sid = clean_str(id)
             if self.mode == "postgresql":
                 set_clause = ", ".join([f"{k} = %s" for k in updates.keys()])
-                params = list(updates.values()) + [sid]
+                params = list(updates.values()) + [clean_str(id)]
                 cur.execute(f"UPDATE students SET {set_clause} WHERE id = %s;", params)
             else:
                 set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
-                params = list(updates.values()) + [sid]
+                params = list(updates.values()) + [clean_str(id)]
                 cur.execute(f"UPDATE students SET {set_clause} WHERE id = ?;", params)
             conn.commit()
         finally:

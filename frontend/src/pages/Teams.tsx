@@ -171,9 +171,11 @@ export default function Teams() {
               placeholder={t("search_members")}
             />
           </div>
-          <button onClick={() => setShowCreate(true)} className="btn-primary flex-shrink-0">
-            <Plus className="w-4 h-4" /> {t("add_team")}
-          </button>
+          {canManageSubmissions && (
+            <button onClick={() => setShowCreate(true)} className="btn-primary flex-shrink-0">
+              <Plus className="w-4 h-4" /> {t("add_team")}
+            </button>
+          )}
         </div>
       </header>
 
@@ -203,7 +205,7 @@ export default function Teams() {
                   <div>
                     <h3 className="font-semibold text-text-main">{team.name}</h3>
                     <p className="text-xs text-text-muted">
-                      {t("members")}: {team.members?.length ?? 0}
+                      {t("members")}: {team.member_count ?? team.members?.length ?? 0}
                     </p>
                   </div>
                 </div>
@@ -305,7 +307,8 @@ export default function Teams() {
 
             <div className="p-5 space-y-5 overflow-y-auto flex-1">
               {/* Interactive Student Search & Quick Add */}
-              <div className="p-4 rounded-xl bg-surface/50 border border-border/60">
+              {canManageSubmissions && (
+                <div className="p-4 rounded-xl bg-surface/50 border border-border/60">
                 <label className="block text-xs font-semibold text-text-muted uppercase mb-2">
                   Search & Add Student to Team
                 </label>
@@ -383,6 +386,7 @@ export default function Teams() {
                   </p>
                 )}
               </div>
+              )}
 
               {/* Current Team Members List */}
               <div>
@@ -413,13 +417,15 @@ export default function Teams() {
                           <div className="font-medium text-text-main text-sm truncate">{m.name}</div>
                           <div className="text-xs text-text-muted font-mono">{m.enrollment_number}</div>
                         </div>
-                        <button
-                          onClick={() => removeMember(m.id)}
-                          className="btn-danger-icon"
-                          title={t("remove")}
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
+                        {canManageSubmissions && (
+                          <button
+                            onClick={() => removeMember(m.id)}
+                            className="btn-danger-icon"
+                            title={t("remove")}
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>

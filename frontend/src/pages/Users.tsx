@@ -1,4 +1,4 @@
-﻿import { useState, useRef } from "react";
+import { useState, useRef } from "react";
 import { UserCog, RefreshCw, Search, Trash2, Plus, Loader2, Upload, Download, FileSpreadsheet, CheckCircle2, AlertCircle, X } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
@@ -9,6 +9,7 @@ const ROLES = [
   { value: "student", label: "Student" },
   { value: "faculty", label: "Faculty / Department Head" },
   { value: "college_admin", label: "College Admin" },
+  { value: "university_admin", label: "University Admin" },
   { value: "ministry_admin", label: "Ministry Admin" },
 ];
 

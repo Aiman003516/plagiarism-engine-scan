@@ -11,6 +11,22 @@ from .base import StorageService
 
 
 class SupabaseStorage(StorageService):
+    @staticmethod
+    def _validate_safe_path(p: str) -> str:
+        clean = p.replace("\\", "/").strip().lstrip("/")
+        parts = clean.split("/")
+        if ".." in parts or any(part == "." for part in parts):
+            raise ValueError(f"Unsafe path traversal detected: {p}")
+        return clean
+
+    @staticmethod
+    def _validate_safe_path(p: str) -> str:
+        clean = p.replace("\\", "/").strip().lstrip("/")
+        parts = clean.split("/")
+        if ".." in parts or any(part == "." for part in parts):
+            raise ValueError(f"Unsafe path traversal detected: {p}")
+        return clean
+
     def __init__(self, url: str, key: str, bucket: str = "project-files"):
         if not HAS_SUPABASE or create_client is None:
             raise ImportError("The 'supabase' package is required when STORAGE_BACKEND='supabase'.")
@@ -26,7 +42,7 @@ class SupabaseStorage(StorageService):
             pass # Ignored, permissions might be restricted
 
     def save_file(self, path: str, content: bytes) -> str:
-        clean_path = path.lstrip("/")
+        clean_path = self._validate_safe_path(path)
         self.supabase.storage.from_(self.bucket).upload(
             file=content,
             path=clean_path,
@@ -35,12 +51,12 @@ class SupabaseStorage(StorageService):
         return self.supabase.storage.from_(self.bucket).get_public_url(clean_path)
 
     def read_file(self, path: str) -> bytes:
-        clean_path = path.lstrip("/")
+        clean_path = self._validate_safe_path(path)
         res = self.supabase.storage.from_(self.bucket).download(clean_path)
         return res
 
     def delete_file(self, path: str) -> None:
-        clean_path = path.lstrip("/")
+        clean_path = self._validate_safe_path(path)
         self.supabase.storage.from_(self.bucket).remove([clean_path])
 
     def delete_directory(self, dir_path: str) -> None:

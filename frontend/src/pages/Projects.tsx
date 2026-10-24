@@ -38,7 +38,7 @@ export default function Projects() {
   const { t } = useTranslation();
   const { projects, loading, error, refresh: load } = useProjectsCache();
 
-  const user = useMemo<{ id?: string; role?: string } | null>(() => {
+  const user = useMemo<{ id?: string; role?: string; team_id?: string } | null>(() => {
     const userStr = localStorage.getItem("user_data") || localStorage.getItem("user");
     if (!userStr) return null;
     try {
@@ -224,7 +224,7 @@ export default function Projects() {
   };
 
   const filtered = projects.filter((p: ProjectSummary) => {
-    if (isStudent && p.student_id !== user?.id) return false;
+    if (isStudent && p.student_id !== user?.id && (!p.team_id || p.team_id !== user?.team_id)) return false;
 
     return (
       !search.trim() ||

@@ -211,7 +211,10 @@ class FileExtractor:
         for root, dirs, files in os.walk(dir_path):
             if size_exceeded:
                 break
-            dirs[:] = [d for d in dirs if d.lower() not in ignored_d and not d.startswith('.')]
+            dirs[:] = [
+                d for d in dirs
+                if d.lower() not in ignored_d and not d.startswith('.') and not os.path.islink(os.path.join(root, d))
+            ]
 
             for file in files:
                 file_name_lower = file.lower()
@@ -219,6 +222,8 @@ class FileExtractor:
                     continue
 
                 file_path = Path(root) / file
+                if os.path.islink(file_path):
+                    continue
                 rel_path = str(file_path.relative_to(dir_path))
                 try:
                     file_size = file_path.stat().st_size

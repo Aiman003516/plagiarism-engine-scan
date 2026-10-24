@@ -1,4 +1,4 @@
-﻿"""Schema creation / migration for all tables."""
+"""Schema creation / migration for all tables."""
 
 
 
@@ -29,8 +29,21 @@ class SchemaMixin:
                 CREATE TABLE IF NOT EXISTS projects (
                     id VARCHAR(255) PRIMARY KEY,
                     name VARCHAR(255) NOT NULL,
+                    title VARCHAR(500),
+                    abstract TEXT,
+                    team_id VARCHAR(255),
+                    department VARCHAR(255),
+                    year INTEGER,
+                    university VARCHAR(255),
                     status VARCHAR(50) DEFAULT 'approved',
                     student_id VARCHAR(255),
+                    review_notes TEXT,
+                    submitted_by_student_id VARCHAR(255),
+                    university_id VARCHAR(255),
+                    college_id VARCHAR(255),
+                    department_id VARCHAR(255),
+                    abstract_embedding TEXT,
+                    abstract_embedding_binary BIT(1024),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS papers (
@@ -110,6 +123,7 @@ class SchemaMixin:
                     id VARCHAR(255) PRIMARY KEY,
                     name VARCHAR(255) NOT NULL,
                     college_id VARCHAR(255),
+                    submission_allowed BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_teams_college ON teams(college_id);
@@ -148,6 +162,9 @@ class SchemaMixin:
                     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS university VARCHAR(255);",
                     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'approved';",
                     "ALTER TABLE projects ADD COLUMN IF NOT EXISTS student_id VARCHAR(255);",
+                    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS review_notes TEXT;",
+                    "ALTER TABLE projects ADD COLUMN IF NOT EXISTS submitted_by_student_id VARCHAR(255);",
+                    "ALTER TABLE teams ADD COLUMN IF NOT EXISTS submission_allowed BOOLEAN DEFAULT FALSE;",
                     # RBAC upgrade: students authenticate with enrollment_number + password
                     "ALTER TABLE students ADD COLUMN IF NOT EXISTS password_hash TEXT;",
                     "ALTER TABLE students ADD COLUMN IF NOT EXISTS requires_password_change BOOLEAN DEFAULT TRUE;",
@@ -226,8 +243,21 @@ class SchemaMixin:
                 CREATE TABLE IF NOT EXISTS projects (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
+                    title TEXT,
+                    abstract TEXT,
+                    team_id TEXT,
+                    department TEXT,
+                    year INTEGER,
+                    university TEXT,
                     status TEXT DEFAULT 'approved',
                     student_id TEXT,
+                    review_notes TEXT,
+                    submitted_by_student_id TEXT,
+                    university_id TEXT,
+                    college_id TEXT,
+                    department_id TEXT,
+                    abstract_embedding TEXT,
+                    abstract_embedding_binary TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS papers (
@@ -308,6 +338,7 @@ class SchemaMixin:
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     college_id TEXT,
+                    submission_allowed BOOLEAN DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_teams_college ON teams(college_id);
@@ -347,6 +378,9 @@ class SchemaMixin:
                     "ALTER TABLE projects ADD COLUMN university TEXT;",
                     "ALTER TABLE projects ADD COLUMN status TEXT DEFAULT 'approved';",
                     "ALTER TABLE projects ADD COLUMN student_id TEXT;",
+                    "ALTER TABLE projects ADD COLUMN review_notes TEXT;",
+                    "ALTER TABLE projects ADD COLUMN submitted_by_student_id TEXT;",
+                    "ALTER TABLE teams ADD COLUMN submission_allowed BOOLEAN DEFAULT 0;",
                     # RBAC upgrade: students authenticate with enrollment_number + password
                     "ALTER TABLE students ADD COLUMN password_hash TEXT;",
                     "ALTER TABLE students ADD COLUMN requires_password_change BOOLEAN DEFAULT 1;",
@@ -395,18 +429,18 @@ class SchemaMixin:
                 if self.mode == "postgresql":
                     cur.execute("""
                         INSERT INTO universities (id, name, code)
-                        VALUES ('uni_baghdad', 'Baghdad University', 'UOB')
+                        VALUES ('uni_sanaa', 'Sana''a University', 'SU')
                         ON CONFLICT (id) DO NOTHING;
                         INSERT INTO colleges (id, university_id, name)
-                        VALUES ('col_engineering', 'uni_baghdad', 'College of Engineering')
+                        VALUES ('col_sanaa_cit', 'uni_sanaa', 'College of Computer & IT')
                         ON CONFLICT (id) DO NOTHING;
                         INSERT INTO departments (id, college_id, name)
-                        VALUES ('dept_computer', 'col_engineering', 'Computer Engineering')
+                        VALUES ('dept_sanaa_ai', 'col_sanaa_cit', 'Artificial Intelligence')
                         ON CONFLICT (id) DO NOTHING;
                     """)
                 else:
-                    cur.execute("INSERT OR IGNORE INTO universities (id, name, code) VALUES ('uni_baghdad', 'Baghdad University', 'UOB');")
-                    cur.execute("INSERT OR IGNORE INTO colleges (id, university_id, name) VALUES ('col_engineering', 'uni_baghdad', 'College of Engineering');")
-                    cur.execute("INSERT OR IGNORE INTO departments (id, college_id, name) VALUES ('dept_computer', 'col_engineering', 'Computer Engineering');")
+                    cur.execute("INSERT OR IGNORE INTO universities (id, name, code) VALUES ('uni_sanaa', 'Sana''a University', 'SU');")
+                    cur.execute("INSERT OR IGNORE INTO colleges (id, university_id, name) VALUES ('col_sanaa_cit', 'uni_sanaa', 'College of Computer & IT');")
+                    cur.execute("INSERT OR IGNORE INTO departments (id, college_id, name) VALUES ('dept_sanaa_ai', 'col_sanaa_cit', 'Artificial Intelligence');")
         except Exception:
             pass

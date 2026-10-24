@@ -33,7 +33,7 @@ async def dashboard_stats():
 
     def _compute():
         history = _load_history()
-        recent_scans = history[::-1][:10] if history else []
+        recent_scans = history[:10] if history else []
         
         # Calculate verdicts distribution across historical scans
         verdicts = {"SAFE": 0, "LOW": 0, "HIGH": 0, "CRITICAL": 0, "FLAGGED": 0}

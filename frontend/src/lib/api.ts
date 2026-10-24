@@ -30,6 +30,24 @@ export const scanStreamReconnectUrl = (projectId: string, streamToken: string, a
     + `?token=${encodeURIComponent(streamToken)}&after=${cursor}`;
 };
 
+export function clearAllSessionCaches() {
+  localStorage.removeItem("auth_token");
+  localStorage.removeItem("user_data");
+  localStorage.removeItem("user");
+  localStorage.removeItem("cached_saved_projects");
+  localStorage.removeItem("cached_teams_list");
+  localStorage.removeItem("dashboard_cache");
+  localStorage.removeItem("plagiarism-scan-storage");
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith("cached_users_") || key.startsWith("deepScanResultsCache_"))) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch {}
+}
+
 export class ApiError extends Error {
   status: number;
   data: any;
@@ -81,8 +99,7 @@ export async function apiFetch<T = any>(endpoint: string, options: RequestInit &
         endpoint.startsWith("/api/auth/login") ||
         endpoint.startsWith("/api/auth/change-password");
       if (res.status === 401 && !isAuthFormError) {
-        localStorage.removeItem("auth_token");
-        localStorage.removeItem("user_data");
+        clearAllSessionCaches();
         window.dispatchEvent(new CustomEvent("auth-expired"));
       }
       throw new ApiError(errorMsg, res.status, data);
@@ -1010,6 +1027,7 @@ export interface TeamData {
   name: string;
   college_id?: string | null;
   submission_allowed?: boolean;
+  member_count?: number;
   created_at?: string;
   members?: TeamMemberData[];
 }

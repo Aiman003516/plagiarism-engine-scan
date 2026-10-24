@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Ministry Plagiarism Engine — React App Entry
  * Responsive sidebar navigation for all Phase 1 pages.
  */
@@ -56,6 +56,19 @@ function ProtectedRoute() {
   }, []);
 
   if (!token) return <Navigate to="/login" replace />;
+
+  const userStr = localStorage.getItem("user_data") || localStorage.getItem("user");
+  let requiresChange = false;
+  try {
+    const u = userStr ? JSON.parse(userStr) : null;
+    requiresChange = !!u?.requires_password_change;
+  } catch {}
+
+  const currentPath = window.location.pathname;
+  if (requiresChange && currentPath !== "/force-change-password") {
+    return <Navigate to="/force-change-password" replace />;
+  }
+
   return <Outlet />;
 }
 

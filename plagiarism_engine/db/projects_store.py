@@ -58,10 +58,13 @@ class ProjectsStoreMixin:
             if self.mode == "postgresql":
                 cur.execute("INSERT INTO projects (id, name) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING;", (pid, pname))
                 if file_rows:
+                    new_rel_paths = [r[2] for r in file_rows]
+                    # Clean up deleted files from previous upload
+                    cur.execute("DELETE FROM project_files WHERE project_id = %s AND relative_path != ALL(%s);", (pid, new_rel_paths))
                     cur.executemany("""
                         INSERT INTO project_files (id, project_id, relative_path, file_type, content)
                         VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO UPDATE SET file_type=EXCLUDED.file_type;
+                        ON CONFLICT (id) DO UPDATE SET file_type=EXCLUDED.file_type, embedding_binary=NULL, embedding=NULL;
                     """, file_rows)
             else:
                 cur.execute("INSERT OR REPLACE INTO projects (id, name) VALUES (?, ?);", (pid, pname))
@@ -123,13 +126,13 @@ class ProjectsStoreMixin:
 
             if self.mode == "postgresql":
                 cur.execute(
-                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id, review_notes, submitted_by_student_id "
+                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id, review_notes, submitted_by_student_id, university_id, college_id, department_id "
                     "FROM projects ORDER BY created_at DESC LIMIT %s OFFSET %s;",
                     (limit, offset),
                 )
             else:
                 cur.execute(
-                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id, review_notes, submitted_by_student_id "
+                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id, review_notes, submitted_by_student_id, university_id, college_id, department_id "
                     "FROM projects ORDER BY created_at DESC LIMIT ? OFFSET ?;",
                     (limit, offset),
                 )
@@ -183,13 +186,13 @@ class ProjectsStoreMixin:
             pid = clean_str(project_id)
             if self.mode == "postgresql":
                 cur.execute(
-                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id, review_notes, submitted_by_student_id "
+                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id, review_notes, submitted_by_student_id, university_id, college_id, department_id "
                     "FROM projects WHERE id = %s;",
                     (pid,),
                 )
             else:
                 cur.execute(
-                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id, review_notes, submitted_by_student_id "
+                    "SELECT id, name, title, abstract, team_id, department, year, university, status, created_at, student_id, review_notes, submitted_by_student_id, university_id, college_id, department_id "
                     "FROM projects WHERE id = ?;",
                     (pid,),
                 )
@@ -208,6 +211,9 @@ class ProjectsStoreMixin:
                 "student_id": row[10] if len(row) > 10 else None,
                 "review_notes": row[11] if len(row) > 11 else None,
                 "submitted_by_student_id": row[12] if len(row) > 12 else None,
+                "university_id": row[13] if len(row) > 13 else None,
+                "college_id": row[14] if len(row) > 14 else None,
+                "department_id": row[15] if len(row) > 15 else None,
             }
         finally:
             conn.close()

@@ -22,6 +22,23 @@ from app.state import get_db
 router = APIRouter(tags=["scanner"])
 
 
+def _get_caller_institution_metadata(current_user: Optional[dict]) -> dict:
+    if not current_user or not current_user.get("user_id"):
+        return {}
+    try:
+        from plagiarism_engine.db.users_store import UsersStore
+        user_info = UsersStore().get_user_by_id(current_user["user_id"])
+        if not user_info:
+            return {}
+        return {
+            "university_id": user_info.get("university_id"),
+            "college_id": user_info.get("college_id"),
+            "department_id": user_info.get("department_id"),
+        }
+    except Exception:
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Pydantic Models
 # ---------------------------------------------------------------------------
@@ -74,11 +91,12 @@ async def reconnect_scan_stream(
 
 
 # --- Upload + Scan (JSON response) ---
-@router.post("/api/plagiarism/upload-scan", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
+@router.post("/api/plagiarism/upload-scan")
 async def upload_and_scan(
     project_name: str = Form(...),
     scan_type: str = Form("Direct Upload Project Scan"),
     files: List[UploadFile] = File(...),
+    current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty")),
 ):
     extracted_files = []
     for upload_file in files:
@@ -110,8 +128,9 @@ async def upload_and_scan(
     # Run the CPU/IO-heavy fingerprinting + comparison work in a worker thread so the
     # async event loop is never blocked (mirrors the streaming endpoints' behaviour).
     try:
+        inst_meta = _get_caller_institution_metadata(current_user)
         result = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: _run_intake(project_name, extracted_files)
+            None, lambda: _run_intake(project_name, extracted_files, metadata=inst_meta)
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -119,7 +138,7 @@ async def upload_and_scan(
 
 
 # --- Upload + Scan (SSE Streaming) ---
-@router.post("/api/plagiarism/upload-scan-stream", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
+@router.post("/api/plagiarism/upload-scan-stream")
 async def upload_and_scan_stream(
     project_name: str = Form(...),
     scan_type: str = Form("Direct Upload Project Scan"),
@@ -129,6 +148,7 @@ async def upload_and_scan_stream(
     department: Optional[str] = Form(None),
     year: Optional[int] = Form(None),
     university: Optional[str] = Form(None),
+    current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty")),
 ):
     # Read files synchronously first
     extracted_files = []
@@ -161,6 +181,7 @@ async def upload_and_scan_stream(
     # Register the resumable session BEFORE streaming so a client that navigates
     # away mid-scan can re-attach via GET /api/plagiarism/scan-stream/{project}.
     session = _start_scan_session(project_name)
+    inst_meta = _get_caller_institution_metadata(current_user)
 
     async def event_stream():
         loop = asyncio.get_running_loop()
@@ -173,9 +194,12 @@ async def upload_and_scan_stream(
                 metadata = {
                     "title": title,
                     "abstract": abstract,
-                    "department": department,
+                    "department": department or inst_meta.get("department_id"),
                     "year": year,
                     "university": university,
+                    "university_id": inst_meta.get("university_id"),
+                    "college_id": inst_meta.get("college_id"),
+                    "department_id": inst_meta.get("department_id"),
                 }
                 res = _run_intake(project_name, extracted_files, log_callback=log_callback, metadata=metadata)
                 session.publish({"type": "complete", "result": res})
@@ -199,7 +223,7 @@ async def upload_and_scan_stream(
 
 
 # --- Upload + Scan ZIP Archive (SSE Streaming) ---
-@router.post("/api/plagiarism/upload-zip-stream", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
+@router.post("/api/plagiarism/upload-zip-stream")
 async def upload_zip_stream(
     project_name: str = Form(...),
     scan_type: str = Form("ZIP Archive Scan"),
@@ -209,6 +233,7 @@ async def upload_zip_stream(
     department: Optional[str] = Form(None),
     year: Optional[int] = Form(None),
     university: Optional[str] = Form(None),
+    current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty")),
 ):
     import zipfile
 
@@ -216,6 +241,7 @@ async def upload_zip_stream(
 
     # Resumable session — see `_start_scan_session` and the reconnect endpoint.
     session = _start_scan_session(project_name)
+    inst_meta = _get_caller_institution_metadata(current_user)
 
     async def event_stream():
         loop = asyncio.get_running_loop()
@@ -265,9 +291,12 @@ async def upload_zip_stream(
                 metadata = {
                     "title": title,
                     "abstract": abstract,
-                    "department": department,
+                    "department": department or inst_meta.get("department_id"),
                     "year": year,
                     "university": university,
+                    "university_id": inst_meta.get("university_id"),
+                    "college_id": inst_meta.get("college_id"),
+                    "department_id": inst_meta.get("department_id"),
                 }
                 res = _run_intake(project_name, extracted_files, log_callback=log_callback, metadata=metadata)
                 session.publish({"type": "complete", "result": res})
@@ -292,8 +321,11 @@ async def upload_zip_stream(
 
 
 # --- Git Repo Scan (JSON) ---
-@router.post("/api/plagiarism/git-scan", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
-async def git_scan(payload: GitScanRequest):
+@router.post("/api/plagiarism/git-scan")
+async def git_scan(
+    payload: GitScanRequest,
+    current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty")),
+):
     tmp_dir, git_metadata = _clone_git_repo(payload.repo_url, payload.branch or "main", payload.access_token)
 
     try:
@@ -305,10 +337,22 @@ async def git_scan(payload: GitScanRequest):
             if "relative_path" not in f:
                 f["relative_path"] = f.get("filename", "")
 
+        inst_meta = _get_caller_institution_metadata(current_user)
+        metadata = {
+            "title": payload.title or project_name,
+            "abstract": payload.abstract,
+            "department": payload.department or inst_meta.get("department_id"),
+            "year": payload.year,
+            "university": payload.university,
+            "university_id": inst_meta.get("university_id"),
+            "college_id": inst_meta.get("college_id"),
+            "department_id": inst_meta.get("department_id"),
+        }
+
         try:
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
-                None, lambda: _run_intake(project_name, extracted_files, git_metadata=git_metadata)
+                None, lambda: _run_intake(project_name, extracted_files, git_metadata=git_metadata, metadata=metadata)
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -318,8 +362,11 @@ async def git_scan(payload: GitScanRequest):
 
 
 # --- Git Repo Scan (SSE Streaming) ---
-@router.post("/api/plagiarism/git-scan-stream", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
-async def git_scan_stream(payload: GitScanRequest):
+@router.post("/api/plagiarism/git-scan-stream")
+async def git_scan_stream(
+    payload: GitScanRequest,
+    current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty")),
+):
     # Resolve the project id up-front so the resumable session can be keyed by it
     # Prevent browser-autofill emails from being mistakenly used as project names
     raw_name = (payload.project_name or "").strip()
@@ -330,6 +377,7 @@ async def git_scan_stream(payload: GitScanRequest):
         project_name = raw_name
 
     session = _start_scan_session(project_name)
+    inst_meta = _get_caller_institution_metadata(current_user)
 
     async def event_stream():
         loop = asyncio.get_running_loop()
@@ -354,9 +402,12 @@ async def git_scan_stream(payload: GitScanRequest):
                 metadata = {
                     "title": payload.title or project_name,
                     "abstract": payload.abstract,
-                    "department": payload.department,
+                    "department": payload.department or inst_meta.get("department_id"),
                     "year": payload.year,
                     "university": payload.university,
+                    "university_id": inst_meta.get("university_id"),
+                    "college_id": inst_meta.get("college_id"),
+                    "department_id": inst_meta.get("department_id"),
                 }
 
                 res = _run_intake(

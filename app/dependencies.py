@@ -93,7 +93,7 @@ VALID_ROLES = {"ministry_admin", "university_admin", "college_admin", "faculty",
 STAFF_ROLES = {"ministry_admin", "university_admin", "college_admin", "faculty"}
 ADMIN_ROLES = {"ministry_admin", "university_admin", "college_admin"}
 
-def require_role(*allowed_roles: str):
+def require_role(*allowed_roles: str, allow_password_change_pending: bool = False):
     """
     FastAPI dependency enforcing JWT + role-based access control.
 
@@ -120,11 +120,18 @@ def require_role(*allowed_roles: str):
         if role not in effective_roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions for this operation.")
 
+        requires_pwd = bool(payload.get("requires_password_change"))
+        if requires_pwd and not allow_password_change_pending:
+            raise HTTPException(
+                status_code=403,
+                detail="Password change required before accessing this resource."
+            )
+
         return {
             "user_id": user_id,
             "email": email,
             "role": role,
-            "requires_password_change": bool(payload.get("requires_password_change")),
+            "requires_password_change": requires_pwd,
         }
 
     return _enforce
