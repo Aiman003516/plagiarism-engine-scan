@@ -94,4 +94,16 @@ bench_faiss_before.py
 verify_upload_perf.py
 scratch/
 *.pdf
+*.log
+test_results.txt
+
+# =============================================================================
+# Offline Documentation, Research Papers & QA Verification Tools
+# (Maintained offline locally, never tracked or pushed to remote repository)
+# =============================================================================
+docs/
+qa_tools/
+archive/
+goals/
+
 
