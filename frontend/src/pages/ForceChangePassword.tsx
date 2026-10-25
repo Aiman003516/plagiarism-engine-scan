@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ForceChangePassword — mandatory password rotation screen.
  *
  * Reached from /login or /register when the backend reports
@@ -9,7 +9,7 @@
 
 import React, { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { motion } from "motion/react";
+import { motion } from "framer-motion";
 import { ShieldCheck, Lock, Loader2 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";

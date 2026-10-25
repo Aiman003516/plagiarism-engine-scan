@@ -1,6 +1,6 @@
-﻿import React, { useState } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion } from "motion/react";
+import { motion } from "framer-motion";
 import { Shield, Mail, Lock, Loader2 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";

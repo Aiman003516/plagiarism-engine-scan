@@ -97,7 +97,7 @@ async def update_project(project_id: str, payload: ProjectUpdate, current_user: 
         if existing.get("student_id") != caller_id and existing.get("submitted_by_student_id") != caller_id:
             raise HTTPException(status_code=403, detail="You can only edit your own project.")
         if existing.get("status") in ("approved", "rejected"):
-            raise HTTPException(status_code=400, detail="Cannot edit proposal once it has been approved or rejected. Contact your supervisor to request changes.")
+            raise HTTPException(status_code=403, detail="Cannot edit proposal once it has been approved or rejected. Contact your supervisor to request changes.")
         if payload.status and payload.status != "pending_review":
             raise HTTPException(status_code=403, detail="Students cannot alter project status.")
     elif caller_role in ("college_admin", "faculty"):

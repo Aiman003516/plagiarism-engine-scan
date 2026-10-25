@@ -23,7 +23,8 @@ class TeamCreate(BaseModel):
 
 
 class TeamUpdate(BaseModel):
-    name: str
+    name: Optional[str] = None
+    submission_allowed: Optional[bool] = None
 
 
 class ToggleSubmissionPayload(BaseModel):
@@ -150,13 +151,34 @@ async def get_team(team_id: str, current_user: dict = Depends(require_role())):
     def _get():
         team = db.get_team_by_id(team_id)
         if not team:
-            return None, None
-        members = db.get_team_members(team_id)
-        return team, members
+            return None, None, "NOT_FOUND"
 
-    team, members = await loop.run_in_executor(None, _get)
-    if not team:
+        if caller_role != "student":
+            caller_record = db.get_user_by_id(current_user["user_id"]) or {}
+            team_college = team.get("college_id")
+            if caller_role in ("college_admin", "faculty"):
+                caller_college = caller_record.get("college_id")
+                if team_college and caller_college and team_college != caller_college:
+                    return None, None, "FORBIDDEN"
+            elif caller_role == "university_admin":
+                caller_uni = caller_record.get("university_id")
+                conn = db._get_connection()
+                cur = conn.cursor()
+                q = "SELECT university_id FROM colleges WHERE id = %s" if db.mode == "postgresql" else "SELECT university_id FROM colleges WHERE id = ?"
+                cur.execute(q, (team_college,))
+                r = cur.fetchone()
+                conn.close()
+                if not r or r[0] != caller_uni:
+                    return None, None, "FORBIDDEN"
+
+        members = db.get_team_members(team_id)
+        return team, members, "OK"
+
+    team, members, status = await loop.run_in_executor(None, _get)
+    if status == "NOT_FOUND":
         raise HTTPException(status_code=404, detail="Team not found")
+    if status == "FORBIDDEN":
+        raise HTTPException(status_code=403, detail="Insufficient permissions to view a team outside your institution.")
     return {**team, "members": members}
 
 
@@ -188,7 +210,7 @@ async def update_team(team_id: str, payload: TeamUpdate, current_user: dict = De
             if not r or r[0] != caller_uni:
                 return None, "FORBIDDEN"
 
-        db.update_team(team_id, name=payload.name)
+        db.update_team(team_id, name=payload.name, submission_allowed=payload.submission_allowed)
         return db.get_team_by_id(team_id), "OK"
 
     updated, status = await loop.run_in_executor(None, _update)
