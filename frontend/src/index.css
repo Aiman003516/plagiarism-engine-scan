@@ -52,23 +52,23 @@
 
 @layer base {
   :root {
-    /* Light Mode: Clean & Editorial — calibrated to cut glare (off-white base,
-       desaturated green-grey borders, ~13:1 body text contrast without pure black) */
+    /* Light Mode: Architectural Warm Paper — calibrated to cut glare (soft sage-alabaster base,
+       warm paper cards, crisp borders, WCAG AA+ text contrast) */
     color-scheme: light;
-    --bg-background: 244 245 244;
-    --bg-surface: 255 255 255;
-    --bg-surface-hover: 235 238 236;
-    --text-main: 26 38 36;
-    --text-muted: 95 115 110;
-    --border: 215 222 219;
-    --glass-border: 215 222 219;
+    --bg-background: 232 236 235;
+    --bg-surface: 248 250 249;
+    --bg-surface-hover: 223 229 227;
+    --text-main: 19 31 29;
+    --text-muted: 80 98 94;
+    --border: 196 206 203;
+    --glass-border: 180 193 189;
 
     --primary: 1 62 55;
-    --primary-hover: 2 92 82;
-    --primary-text: 255 239 179;
+    --primary-hover: 2 86 76;
+    --primary-text: 255 243 196;
 
-    --accent: 255 239 179;
-    --accent-hover: 255 228 154;
+    --accent: 245 222 147;
+    --accent-hover: 237 209 120;
     --accent-text: 1 62 55;
 
     /* Readable red for highlighted (copied) diff lines on a light surface */
@@ -131,6 +131,7 @@
   html[dir="rtl"] {
     direction: rtl;
     text-align: right;
+    font-family: 'Plus Jakarta Sans', 'Segoe UI', Tahoma, Arial, system-ui, sans-serif;
   }
 
   /* Custom Scrollbar */

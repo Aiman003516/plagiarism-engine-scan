@@ -1137,3 +1137,77 @@ export const systemHealthApi = {
     models_ready?: boolean;
   }>("/api/system/health"),
 };
+
+// ============================================================================
+// Report Generation & Export Utilities
+// ============================================================================
+export function triggerDownload(content: string, filename: string, mimeType = "text/plain;charset=utf-8"): void {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function generateAuditReportText(report: any): string {
+  if (!report) return "No report data available.";
+  const title = report.project_name || report.target || report.id || "Plagiarism Scan";
+  const date = report.timestamp || new Date().toISOString();
+  const verdict = report.verdict || "UNKNOWN";
+  const sim = report.overall_similarity !== undefined ? `${report.overall_similarity}%` : "0%";
+  const codeSim = report.code_similarity !== undefined ? `${report.code_similarity}%` : "—";
+  const textSim = report.text_similarity !== undefined ? `${report.text_similarity}%` : "—";
+  const filesAnalyzed = report.files_analyzed ?? (report.comparisons ? report.comparisons.length : 0);
+  const loc = report.total_loc ?? 0;
+  const stack = Array.isArray(report.detected_languages) ? report.detected_languages.join(", ") : "—";
+
+  const lines: string[] = [
+    "================================================================================",
+    "                 ACADEMIC INTEGRITY & CODE SIMILARITY AUDIT REPORT               ",
+    "================================================================================",
+    `Project:         ${title}`,
+    `Scan ID:         ${report.id || "N/A"}`,
+    `Audit Date:      ${date}`,
+    `Overall Verdict: ${verdict}`,
+    "--------------------------------------------------------------------------------",
+    "EXECUTIVE METRICS",
+    "--------------------------------------------------------------------------------",
+    `Overall Similarity: ${sim}`,
+    `Code Similarity:    ${codeSim}`,
+    `Text Similarity:    ${textSim}`,
+    `Files Analyzed:     ${filesAnalyzed}`,
+    `Total LOC:          ${loc}`,
+    `Detected Stack:     ${stack}`,
+    "",
+    "--------------------------------------------------------------------------------",
+    "MATCHED SUSPICIOUS PAIRS",
+    "--------------------------------------------------------------------------------",
+  ];
+
+  const comps = report.comparisons || [];
+  if (comps.length === 0) {
+    lines.push("No significant suspicious similarity detected.");
+  } else {
+    comps.forEach((c: any, idx: number) => {
+      const s = c.fusion_score ?? c.similarity ?? 0;
+      lines.push(
+        `[#${idx + 1}] Score: ${s}% | Source: ${c.source_file || c.file_a || "File A"} <--> Target: ${c.target_file || c.file_b || "File B"}`
+      );
+      if (c.verdict) lines.push(`     Verdict: ${c.verdict}`);
+      if (c.details || c.matched_segments_count) {
+        lines.push(`     Matched Segments: ${c.matched_segments_count ?? "—"}`);
+      }
+      lines.push("");
+    });
+  }
+
+  lines.push("================================================================================");
+  lines.push("End of Audit Report — National Academic Verification System");
+  lines.push("================================================================================");
+
+  return lines.join("\n");
+}

@@ -163,11 +163,11 @@ export default function Teams() {
         </div>
         <div className="flex items-center gap-3">
           <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+            <Search className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="input-field w-full pl-9"
+              className="input-field w-full ps-9"
               placeholder={t("search_members")}
             />
           </div>
@@ -222,14 +222,14 @@ export default function Teams() {
 
               {/* One-Time Submission Permission Status */}
               <div className="mt-3 pt-3 border-t border-glass-border flex items-center justify-between text-xs">
-                <span className="text-text-muted text-[11px]">Proposal Submission:</span>
+                <span className="text-text-muted text-[11px]">{t("proposal_submission_status") || "Proposal Submission:"}</span>
                 {team.submission_allowed ? (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                    <Unlock className="w-3 h-3" /> Token Active
+                    <Unlock className="w-3 h-3" /> {t("token_active") || "Token Active"}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-surface text-text-muted border border-glass-border">
-                    <Lock className="w-3 h-3 text-amber-500" /> Locked
+                    <Lock className="w-3 h-3 text-amber-500" /> {t("token_locked") || "Locked"}
                   </span>
                 )}
               </div>
@@ -244,7 +244,7 @@ export default function Teams() {
                   }`}
                 >
                   <KeyRound className="w-3.5 h-3.5" />
-                  {team.submission_allowed ? "Revoke Proposal Token" : "Grant 1-Time Proposal Submission"}
+                  {team.submission_allowed ? (t("revoke_token") || "Revoke Proposal Token") : (t("grant_token") || "Grant 1-Time Proposal Submission")}
                 </button>
               )}
 

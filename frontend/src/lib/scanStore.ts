@@ -37,6 +37,7 @@ interface ScanStore {
   scanSource: ScanSource | null;
   scanLogs: string[];
   scanResult: PlagiarismScanResult | null;
+  lastIntakeResult: any | null;
   scanError: string | null;
   scanDuration: number | null;
   lastLogTimestamp: number | null;
@@ -109,6 +110,7 @@ export const useScanStore = create<ScanStore>()(persist((set) => ({
   scanSource: null,
   scanLogs: [],
   scanResult: null,
+  lastIntakeResult: null,
   scanError: null,
   scanDuration: null,
   lastLogTimestamp: null,
@@ -154,7 +156,11 @@ export const useScanStore = create<ScanStore>()(persist((set) => ({
     streamLogCount: 0,
   }),
   completeScan: (result, duration) => set((s) => ({
-    isScanning: false, isReconnecting: false, scanResult: result, scanError: null,
+    isScanning: false,
+    isReconnecting: false,
+    scanResult: result && ("overall_similarity" in result || "comparisons" in result) ? result : s.scanResult,
+    lastIntakeResult: result && !("overall_similarity" in result) ? result : s.lastIntakeResult,
+    scanError: null,
     scanDuration: duration ?? (s.scanStartedAt ? (Date.now() - s.scanStartedAt) / 1000 : s.scanDuration),
     // Stream finished: drop the capability so we never re-attach to a dead stream.
     streamToken: null,
@@ -172,7 +178,7 @@ export const useScanStore = create<ScanStore>()(persist((set) => ({
     streamToken: null,
   })),
   resetScan: () => set({
-    isScanning: false, scanSource: null, scanLogs: [], scanResult: null, scanError: null, abortController: null,
+    isScanning: false, scanSource: null, scanLogs: [], scanResult: null, lastIntakeResult: null, scanError: null, abortController: null,
     activeProjectId: null, streamToken: null, scanStartedAt: null, scanDuration: null, lastLogTimestamp: null, isReconnecting: false,
     streamLogCount: 0,
   }),
@@ -180,7 +186,7 @@ export const useScanStore = create<ScanStore>()(persist((set) => ({
     uploadedFiles: [], projectName: '', isProcessingFiles: false, isTraversing: false,
     totalFilesToProcess: 0, processedFilesCount: 0, processingPhase: '',
     bloatFilteredCount: 0, inspectedTotalNodes: 0,
-    isScanning: false, scanSource: null, scanLogs: [], scanResult: null, scanError: null, abortController: null,
+    isScanning: false, scanSource: null, scanLogs: [], scanResult: null, lastIntakeResult: null, scanError: null, abortController: null,
     activeProjectId: null, streamToken: null, scanStartedAt: null, scanDuration: null, lastLogTimestamp: null, isReconnecting: false,
     streamLogCount: 0,
   }),

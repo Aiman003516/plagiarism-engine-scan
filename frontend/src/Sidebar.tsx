@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { clearAllSessionCaches } from "./lib/api";
 import {
   UploadCloud,
@@ -19,7 +20,9 @@ import {
   Sun,
   Shield,
   LogOut,
+  Languages,
 } from "lucide-react";
+import { useScanStore } from "./lib/scanStore";
 
 function useDarkMode() {
   const [isDark, setIsDark] = useState(() => {
@@ -40,24 +43,23 @@ function useDarkMode() {
 
 interface NavItem {
   to: string;
-  label: string;
+  labelKey: string;
   icon: any;
   allowedRoles: string[];
 }
 
 const navItems: NavItem[] = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty"] },
-  { to: "/", label: "Project Intake", icon: UploadCloud, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty"] },
-  { to: "/scan", label: "Plagiarism Scanner", icon: Search, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty"] },
-  { to: "/projects", label: "Projects & AI Search", icon: FolderOpen, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty", "student"] },
-  { to: "/teams", label: "Team Management", icon: Users, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty", "student"] },
-  { to: "/users", label: "User Management", icon: UserCog, allowedRoles: ["ministry_admin", "university_admin", "college_admin"] },
-  { to: "/settings", label: "Settings", icon: Settings, allowedRoles: ["ministry_admin", "university_admin"] },
+  { to: "/dashboard", labelKey: "dashboard", icon: LayoutDashboard, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty"] },
+  { to: "/", labelKey: "project_intake", icon: UploadCloud, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty"] },
+  { to: "/scan", labelKey: "plagiarism", icon: Search, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty"] },
+  { to: "/projects", labelKey: "projects_search", icon: FolderOpen, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty", "student"] },
+  { to: "/teams", labelKey: "teams", icon: Users, allowedRoles: ["ministry_admin", "university_admin", "college_admin", "faculty", "student"] },
+  { to: "/users", labelKey: "user_management", icon: UserCog, allowedRoles: ["ministry_admin", "university_admin", "college_admin"] },
+  { to: "/settings", labelKey: "settings", icon: Settings, allowedRoles: ["ministry_admin", "university_admin"] },
 ];
 
-import { useScanStore } from "./lib/scanStore";
-
 function Sidebar() {
+  const { t, i18n } = useTranslation();
   const location = useLocation();
   const [isDark, toggleDarkMode] = useDarkMode();
   const isScanning = useScanStore((s) => s.isScanning);
@@ -71,76 +73,99 @@ function Sidebar() {
     }
   })();
 
+  const toggleLanguage = () => {
+    const next = i18n.language === "ar" ? "en" : "ar";
+    i18n.changeLanguage(next);
+  };
+
   return (
-    <aside className="fixed md:static inset-y-0 left-0 z-40 flex flex-col w-16 md:w-64 bg-card border-r border-border transition-all duration-300 print:hidden">
+    <aside className="fixed md:static inset-y-0 start-0 z-40 flex flex-col w-16 md:w-64 bg-card border-e border-border transition-all duration-300 print:hidden select-none">
       {/* Logo */}
       <div className="flex items-center justify-center md:justify-start h-16 px-0 md:px-5 border-b border-border shrink-0">
         <Shield className="w-7 h-7 text-primary flex-shrink-0" />
-        <span className="hidden md:block ml-3 font-bold text-lg text-primary tracking-tight">
-          Ministry System
+        <span className="hidden md:block ms-3 font-bold text-base text-primary tracking-tight truncate">
+          {t("ministry_system") || "Ministry System"}
         </span>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-4 px-2 md:px-3 space-y-1">
+      <nav className="flex-1 overflow-y-auto py-3 px-2 md:px-3 space-y-1">
         {navItems
           .filter((item) => item.allowedRoles.includes(user?.role || "student"))
-          .map(({ to, label, icon: Icon }) => {
-            const displayLabel = (to === "/teams" && user?.role === "student") ? "My Team" : label;
-          const isActive = location.pathname === to;
-          return (
-            <Link
-              key={to}
-              to={to}
-              className={`flex items-center justify-center md:justify-start gap-0 md:gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-                isActive
-                  ? "bg-accent text-accent-text shadow-sm"
-                  : "text-text-muted hover:bg-text-muted/10 hover:text-text-main"
-              }`}
-              aria-current={isActive ? "page" : undefined}
-            >
-              <Icon className="w-5 h-5 flex-shrink-0" />
-              <span className="hidden md:inline">{displayLabel}</span>
-              {isScanning && ((to === "/" && scanSource === "intake") || (to === "/scan" && scanSource === "scanner")) && (
-                <span className="ml-auto hidden md:flex h-2 w-2 relative" title="Scan actively processing">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
-              )}
-            </Link>
-          );
-        })}
+          .map(({ to, labelKey, icon: Icon }) => {
+            const displayLabel = (to === "/teams" && user?.role === "student") ? (t("my_team") || "My Team") : (t(labelKey) || labelKey);
+            const isActive = location.pathname === to;
+            return (
+              <Link
+                key={to}
+                to={to}
+                className={`flex items-center justify-center md:justify-start gap-0 md:gap-3 px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+                  isActive
+                    ? "bg-accent text-accent-text shadow-sm"
+                    : "text-text-muted hover:bg-text-muted/10 hover:text-text-main"
+                }`}
+                aria-current={isActive ? "page" : undefined}
+                title={displayLabel}
+              >
+                <Icon className="w-5 h-5 flex-shrink-0" />
+                <span className="hidden md:inline truncate">{displayLabel}</span>
+                {isScanning && ((to === "/" && scanSource === "intake") || (to === "/scan" && scanSource === "scanner")) && (
+                  <span className="ms-auto hidden md:flex h-2 w-2 relative" title="Scan actively processing">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                )}
+              </Link>
+            );
+          })}
       </nav>
 
-      {/* Dark mode toggle */}
-      <div className="p-2 md:p-4 border-t border-border shrink-0">
-        <button
-          type="button"
-          onClick={toggleDarkMode}
-          className="flex items-center justify-center md:justify-start gap-0 md:gap-3 w-full px-2 md:px-3 py-2.5 rounded-xl text-sm font-medium text-text-muted hover:bg-text-muted/10 hover:text-text-main transition-colors"
-          aria-label="Toggle dark mode"
-        >
-          {isDark ? (
-            <Sun className="w-5 h-5 flex-shrink-0" />
-          ) : (
-            <Moon className="w-5 h-5 flex-shrink-0" />
-          )}
-          <span className="hidden md:inline">
-            {isDark ? "Light Mode" : "Dark Mode"}
-          </span>
-        </button>
-      </div>
+      {/* Bottom Controls / Footer */}
+      <div className="p-2 md:p-3 border-t border-border shrink-0 space-y-2">
+        {/* Dark Mode & 1-Click Language Switcher Row */}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={toggleDarkMode}
+            className="flex items-center justify-center md:justify-start gap-2 flex-1 px-2.5 py-2 rounded-xl text-xs font-medium text-text-muted hover:bg-text-muted/10 hover:text-text-main transition-colors"
+            title={isDark ? (t("light_mode") || "Light Mode") : (t("dark_mode") || "Dark Mode")}
+            aria-label="Toggle dark mode"
+          >
+            {isDark ? (
+              <Sun className="w-4 h-4 flex-shrink-0 text-amber-500" />
+            ) : (
+              <Moon className="w-4 h-4 flex-shrink-0 text-indigo-400" />
+            )}
+            <span className="hidden md:inline truncate">
+              {isDark ? (t("light_mode") || "Light Mode") : (t("dark_mode") || "Dark Mode")}
+            </span>
+          </button>
 
-      {/* User profile info */}
-      {user && (
-        <div className="hidden md:flex flex-col px-4 py-2 border-t border-border shrink-0 text-xs">
-          <span className="font-semibold text-text-main truncate">{user.name || user.email}</span>
-          <span className="text-text-muted capitalize">{user.role ? user.role.replace(/_/g, " ") : "Authenticated"}</span>
+          <button
+            type="button"
+            onClick={toggleLanguage}
+            className="flex items-center justify-center md:justify-start gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold text-text-muted hover:bg-text-muted/10 hover:text-text-main transition-colors border border-border/70"
+            title={i18n.language === "ar" ? "Switch to English" : "التبديل إلى العربية"}
+            aria-label="Toggle language"
+          >
+            <Languages className="w-4 h-4 flex-shrink-0 text-primary" />
+            <span className="hidden md:inline font-semibold">
+              {i18n.language === "ar" ? "EN" : "العربية"}
+            </span>
+          </button>
         </div>
-      )}
 
-      {/* Logout */}
-      <div className="p-2 md:p-4 border-t border-border shrink-0">
+        {/* User profile info badge */}
+        {user && (
+          <div className="hidden md:flex flex-col px-2.5 py-1.5 rounded-lg bg-surface/50 border border-border/50 text-xs">
+            <span className="font-semibold text-text-main truncate">{user.name || user.email}</span>
+            <span className="text-text-muted text-[11px] truncate">
+              {user.role ? (t(`role_${user.role}`) || user.role.replace(/_/g, " ")) : (t("authenticated") || "Authenticated")}
+            </span>
+          </div>
+        )}
+
+        {/* Log Out */}
         <button
           onClick={() => {
             clearAllSessionCaches();
@@ -149,9 +174,11 @@ function Sidebar() {
             } catch {}
             window.location.href = "/login";
           }}
-          className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-danger hover:bg-danger/10 transition-colors"
+          className="flex items-center justify-center md:justify-start gap-2.5 w-full px-2.5 py-2 rounded-xl text-xs font-semibold text-danger hover:bg-danger/10 transition-colors"
+          title={t("logout") || "Log Out"}
         >
-          <LogOut className="w-5 h-5" /> <span className="hidden md:inline">Log Out</span>
+          <LogOut className="w-4 h-4 flex-shrink-0" />
+          <span className="hidden md:inline">{t("logout") || "Log Out"}</span>
         </button>
       </div>
     </aside>

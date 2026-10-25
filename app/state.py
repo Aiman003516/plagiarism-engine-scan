@@ -103,28 +103,78 @@ HISTORY_FILE = DATA_DIR / "scan_history.json"
 
 
 _history_lock = threading.Lock()
+_history_cache: Optional[List[Dict[str, Any]]] = None
+_history_summaries_cache: Optional[List[Dict[str, Any]]] = None
+_history_mtime_ns: int = 0
 
 
 def _load_history() -> List[Dict[str, Any]]:
+    global _history_cache, _history_summaries_cache, _history_mtime_ns
     with _history_lock:
-        if HISTORY_FILE.exists():
-            try:
-                content = HISTORY_FILE.read_text(encoding="utf-8")
-                if not content.strip():
-                    return []
-                return json.loads(content)
-            except Exception as e:
-                try:
-                    backup_path = HISTORY_FILE.with_suffix(f".corrupt.{int(datetime.now().timestamp())}.json")
-                    HISTORY_FILE.rename(backup_path)
-                    print(f"Failed to load history, backed up corrupted file to {backup_path}: {e}")
-                except Exception:
-                    pass
+        if not HISTORY_FILE.exists():
+            _history_cache = []
+            _history_summaries_cache = []
+            _history_mtime_ns = 0
+            return []
+
+        try:
+            current_mtime = HISTORY_FILE.stat().st_mtime_ns
+            if _history_cache is not None and current_mtime == _history_mtime_ns:
+                return _history_cache
+
+            content = HISTORY_FILE.read_text(encoding="utf-8")
+            if not content.strip():
+                _history_cache = []
+                _history_summaries_cache = []
+                _history_mtime_ns = current_mtime
                 return []
-        return []
+
+            parsed = json.loads(content)
+            _history_cache = parsed
+            _history_summaries_cache = None
+            _history_mtime_ns = current_mtime
+            return parsed
+        except Exception as e:
+            try:
+                backup_path = HISTORY_FILE.with_suffix(f".corrupt.{int(datetime.now().timestamp())}.json")
+                HISTORY_FILE.rename(backup_path)
+                print(f"Failed to load history, backed up corrupted file to {backup_path}: {e}")
+            except Exception:
+                pass
+            _history_cache = []
+            _history_summaries_cache = []
+            _history_mtime_ns = 0
+            return []
+
+
+def _load_history_summaries() -> List[Dict[str, Any]]:
+    """Return lightweight pre-computed summaries for the history list view."""
+    global _history_summaries_cache
+    with _history_lock:
+        history = _load_history()
+        if _history_summaries_cache is not None:
+            return _history_summaries_cache
+
+        summaries = []
+        for entry in history:
+            summaries.append({
+                "id": entry.get("id", ""),
+                "project_name": entry.get("project_name", ""),
+                "scan_type": entry.get("scan_type", ""),
+                "overall_similarity": entry.get("overall_similarity", 0),
+                "code_similarity": entry.get("code_similarity", 0),
+                "text_similarity": entry.get("text_similarity", 0),
+                "verdict": entry.get("verdict", "SAFE"),
+                "total_files": entry.get("total_files", 0),
+                "total_loc": entry.get("total_loc", 0),
+                "timestamp": entry.get("timestamp", ""),
+            })
+        _history_summaries_cache = summaries
+        return summaries
 
 
 def _save_history(history: List[Dict[str, Any]]):
+    global _history_cache, _history_summaries_cache, _history_mtime_ns
     with _history_lock:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         temp_fd, temp_path = tempfile.mkstemp(dir=DATA_DIR, prefix="history_tmp_", suffix=".json")
@@ -132,6 +182,12 @@ def _save_history(history: List[Dict[str, Any]]):
             with open(temp_fd, "w", encoding="utf-8") as f:
                 json.dump(history, f, indent=2, default=str)
             os.replace(temp_path, HISTORY_FILE)
+            _history_cache = history
+            _history_summaries_cache = None
+            try:
+                _history_mtime_ns = HISTORY_FILE.stat().st_mtime_ns
+            except Exception:
+                _history_mtime_ns = 0
         except Exception as e:
             try:
                 if os.path.exists(temp_path):

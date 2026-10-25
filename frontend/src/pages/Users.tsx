@@ -4,6 +4,7 @@ import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { usersApi, UserProfileData } from "../lib/api";
 import { useUsersCache } from "../lib/useUsersCache";
+import { TableSkeleton } from "../components/Skeletons";
 
 const ROLES = [
   { value: "student", label: "Student" },
@@ -232,52 +233,63 @@ export default function Users() {
 
   return (
     <div>
-      <header className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+      {/* Tier 1: Page Header with Title on Start & Actions on End */}
+      <header className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-text-main">
             {t("users_title")}
           </h1>
           <p className="text-text-muted mt-1">{t("users_subtitle")}</p>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="input-field w-full pl-9"
-              placeholder={t("search_users")}
-            />
-          </div>
-          <select
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-            className="input-field"
-          >
-            <option value="">{t("role")}</option>
-            {ROLES.map((r) => (
-              <option key={r.value} value={r.value}>
-                {r.label}
-              </option>
-            ))}
-          </select>
+        <div className="flex items-center gap-2.5 shrink-0">
           <button
             onClick={() => setShowBulkModal(true)}
-            className="px-3.5 py-2 rounded-xl text-sm font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition-all flex items-center gap-1.5 flex-shrink-0"
+            className="btn-secondary text-xs px-3.5 py-2 font-semibold flex items-center gap-1.5"
             title="Bulk import students from CSV or Excel file"
           >
-            <FileSpreadsheet className="w-4 h-4" /> Bulk Import
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Bulk Import</span>
           </button>
-          <button onClick={() => setShowCreate(true)} className="btn-primary flex-shrink-0">
-            <Plus className="w-4 h-4" /> {t("add_user")}
+          <button onClick={() => setShowCreate(true)} className="btn-primary text-xs px-4 py-2 font-semibold flex items-center gap-1.5">
+            <Plus className="w-4 h-4" />
+            <span>{t("add_user")}</span>
           </button>
         </div>
       </header>
 
-      {loading ? (
-        <div className="flex items-center justify-center min-h-[40vh] text-text-muted">
-          <RefreshCw className="w-6 h-6 animate-spin text-accent" />
+      {/* Tier 2: Dedicated Filter & Search Toolbar */}
+      <div className="mb-4 flex flex-col sm:flex-row items-center justify-between gap-3 bg-surface/50 p-2.5 rounded-xl border border-border">
+        <div className="relative w-full sm:w-72">
+          <Search className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="input-field w-full ps-9 text-xs py-2"
+            placeholder={t("search_users")}
+          />
         </div>
+
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+          <select
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+            className="input-field text-xs py-2 w-full sm:w-52"
+          >
+            <option value="">{t("all_roles") || "All Roles"}</option>
+            {ROLES.map((r) => (
+              <option key={r.value} value={r.value}>
+                {t(`role_${r.value}`) || r.label}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-text-muted whitespace-nowrap px-2.5 py-1 rounded-md bg-surface-hover/80 border border-border/60">
+            {filtered.length} {filtered.length === 1 ? (t("user") || "user") : (t("total_users") || "users")}
+          </span>
+        </div>
+      </div>
+
+      {loading ? (
+        <TableSkeleton columns={5} rows={8} />
       ) : filtered.length === 0 ? (
         <div className="glass-panel p-10 text-center text-text-muted rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
           <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-500/10 text-purple-500">
@@ -290,12 +302,12 @@ export default function Users() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur">
-                <tr className="text-left text-text-muted border-b border-border">
+                <tr className="text-start text-text-muted border-b border-border">
                   <th className="py-3 px-4 font-medium">{t("name")}</th>
                   <th className="py-3 px-4 font-medium">{t("email")} / ID</th>
                   <th className="py-3 px-4 font-medium">{t("role")}</th>
                   <th className="py-3 px-4 font-medium">{t("college")}</th>
-                  <th className="py-3 px-4 font-medium text-right">{t("actions")}</th>
+                  <th className="py-3 px-4 font-medium text-end">{t("actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -386,7 +398,7 @@ export default function Users() {
                 >
                   {ROLES.map((r) => (
                     <option key={r.value} value={r.value}>
-                      {r.label}
+                      {t(`role_${r.value}`) || r.label}
                     </option>
                   ))}
                 </select>

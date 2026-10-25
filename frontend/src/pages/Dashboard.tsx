@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   FolderOpen,
@@ -9,11 +10,15 @@ import {
   ShieldCheck,
   RefreshCw,
   BarChart3,
+  Eye,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { dashboardApi, DashboardStats } from "../lib/api";
+import { toast } from "react-hot-toast";
+import { dashboardApi, DashboardStats, plagiarismApi, PlagiarismScanResult } from "../lib/api";
 import { cn } from "../lib/utils";
+import ReportPreviewModal from "./plagiarism/ReportPreviewModal";
 
 const DASHBOARD_CACHE_KEY = "cached_dashboard_stats";
 
@@ -157,9 +162,28 @@ function similarityText(score: number): string {
 
 export default function Dashboard() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats | null>(getInitialStats);
   const [loading, setLoading] = useState(!getInitialStats()); // Only load if no cache
   const [error, setError] = useState<string | null>(null);
+
+  const [selectedReport, setSelectedReport] = useState<PlagiarismScanResult | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [loadingReportId, setLoadingReportId] = useState<string | null>(null);
+
+  const handleOpenReport = async (scan: any) => {
+    if (!scan.id) return;
+    setLoadingReportId(scan.id);
+    try {
+      const detail = await plagiarismApi.getHistoryDetail(scan.id);
+      setSelectedReport(detail);
+      setPreviewOpen(true);
+    } catch (e: any) {
+      toast.error(e?.message || t("error_occurred") || "Failed to load report");
+    } finally {
+      setLoadingReportId(null);
+    }
+  };
 
   const load = async () => {
     if (!cachedStats) setLoading(true); // Don't show loading spinner if we have cache
@@ -248,12 +272,15 @@ export default function Dashboard() {
         },
         {
           icon: BarChart3,
-          label: "Avg Fusion Score",
+          label: t("avg_fusion_score") || "Avg Fusion Score",
           value: stats.average_fusion_score !== undefined ? `${stats.average_fusion_score}%` : "—",
           tone: "amber",
         },
       ]
     : [];
+
+  const volumeCards = statsCards.slice(0, 4);
+  const integrityCards = statsCards.slice(4);
 
   return (
     <div>
@@ -264,9 +291,10 @@ export default function Dashboard() {
         <p className="text-text-muted mt-1">{t("dashboard_subtitle")}</p>
       </header>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      {/* Tier 1: System Scale & Volume */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {loading && !stats ? (
-          [1, 2, 3, 4, 5, 6].map((i) => (
+          [1, 2, 3, 4].map((i) => (
             <div
               key={i}
               className="h-32 animate-pulse rounded-2xl bg-surface/40 shadow-sm border border-slate-200 dark:border-slate-800"
@@ -274,7 +302,25 @@ export default function Dashboard() {
           ))
         ) : (
           <>
-            {statsCards.map((c) => (
+            {volumeCards.map((c) => (
+              <StatCard key={c.label} {...c} />
+            ))}
+          </>
+        )}
+      </div>
+
+      {/* Tier 2: Academic Integrity & Risk Distribution */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+        {loading && !stats ? (
+          [1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-32 animate-pulse rounded-2xl bg-surface/40 shadow-sm border border-slate-200 dark:border-slate-800"
+            />
+          ))
+        ) : (
+          <>
+            {integrityCards.map((c) => (
               <StatCard key={c.label} {...c} />
             ))}
           </>
@@ -285,7 +331,7 @@ export default function Dashboard() {
       {stats?.verdicts_distribution && (
         <section className="glass-panel mt-6 p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
           <h2 className="text-sm font-semibold text-text-muted mb-3 uppercase tracking-wider">
-            Scan Verdicts Distribution
+            {t("scan_verdicts_distribution") || "Scan Verdicts Distribution"}
           </h2>
           <div className="flex h-6 rounded-full overflow-hidden">
             <div className="bg-green-500 hover:opacity-80 transition-opacity" style={{ flex: stats.verdicts_distribution.SAFE || 0 }} title={`SAFE: ${stats.verdicts_distribution.SAFE || 0}`} />
@@ -294,10 +340,10 @@ export default function Dashboard() {
             <div className="bg-red-600 hover:opacity-80 transition-opacity" style={{ flex: (stats.verdicts_distribution.CRITICAL || 0) + (stats.verdicts_distribution.FLAGGED || 0) }} title={`CRITICAL: ${(stats.verdicts_distribution.CRITICAL || 0) + (stats.verdicts_distribution.FLAGGED || 0)}`} />
           </div>
           <div className="flex gap-4 mt-3 text-xs text-text-muted justify-between sm:justify-start">
-            <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-green-500"></div> SAFE ({stats.verdicts_distribution.SAFE || 0})</span>
-            <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div> LOW ({stats.verdicts_distribution.LOW || 0})</span>
-            <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-orange-500"></div> HIGH ({stats.verdicts_distribution.HIGH || 0})</span>
-            <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-red-600"></div> CRITICAL ({(stats.verdicts_distribution.CRITICAL || 0) + (stats.verdicts_distribution.FLAGGED || 0)})</span>
+            <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-green-500"></div> {t("safe") || "SAFE"} ({stats.verdicts_distribution.SAFE || 0})</span>
+            <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div> {t("low") || "LOW"} ({stats.verdicts_distribution.LOW || 0})</span>
+            <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-orange-500"></div> {t("high") || "HIGH"} ({stats.verdicts_distribution.HIGH || 0})</span>
+            <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-red-600"></div> {t("critical") || "CRITICAL"} ({(stats.verdicts_distribution.CRITICAL || 0) + (stats.verdicts_distribution.FLAGGED || 0)})</span>
           </div>
         </section>
       )}
@@ -315,43 +361,80 @@ export default function Dashboard() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur">
-                <tr className="text-left text-text-muted border-b border-border">
-                  <th className="py-2 px-3 font-medium">{t("project")}</th>
-                  <th className="py-2 px-3 font-medium">{t("status")}</th>
-                  <th className="py-2 px-3 font-medium">{t("col_sim")}</th>
-                  <th className="py-2 px-3 font-medium">{t("timestamp")}</th>
+                <tr className="text-start text-text-muted border-b border-border">
+                  <th className="py-2.5 px-3 font-medium text-start">{t("project")}</th>
+                  <th className="py-2.5 px-3 font-medium text-start">{t("status")}</th>
+                  <th className="py-2.5 px-3 font-medium text-start">{t("col_sim")}</th>
+                  <th className="py-2.5 px-3 font-medium text-start">{t("timestamp")}</th>
+                  <th className="py-2.5 px-3 font-medium text-end">{t("actions")}</th>
                 </tr>
               </thead>
-              <tbody>
-                {stats?.recent_scans.map((scan: any, i: number) => (
-                  <tr key={scan.id || i} className="hover:bg-surface/50 transition-colors">
-                    <td className="py-2.5 px-3">{scan.project_name ?? scan.target ?? "—"}</td>
-                    <td className="py-2.5 px-3">
-                      <span
+              <tbody className="divide-y divide-border">
+                {stats?.recent_scans.map((scan: any, i: number) => {
+                  const isCurrentLoading = loadingReportId === scan.id;
+                  return (
+                    <tr
+                      key={scan.id || i}
+                      onClick={() => handleOpenReport(scan)}
+                      className="group cursor-pointer hover:bg-surface/80 transition-colors"
+                      title={t("click_to_inspect") || "Click to inspect full audit report"}
+                    >
+                      <td className="py-2.5 px-3 font-medium text-text-main group-hover:text-primary transition-colors">
+                        {scan.project_name ?? scan.target ?? "—"}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ring-1",
+                            verdictBadge(scan.verdict),
+                          )}
+                        >
+                          {scan.verdict}
+                        </span>
+                      </td>
+                      <td
                         className={cn(
-                          "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ring-1",
-                          verdictBadge(scan.verdict),
+                          "py-2.5 px-3 font-semibold",
+                          similarityText(Number(scan.overall_similarity ?? 0)),
                         )}
                       >
-                        {scan.verdict}
-                      </span>
-                    </td>
-                    <td
-                      className={cn(
-                        "py-2.5 px-3 font-semibold",
-                        similarityText(Number(scan.overall_similarity ?? 0)),
-                      )}
-                    >
-                      {scan.overall_similarity ?? 0}%
-                    </td>
-                    <td className="py-2.5 px-3 text-text-muted">{scan.timestamp}</td>
-                  </tr>
-                ))}
+                        {scan.overall_similarity ?? 0}%
+                      </td>
+                      <td className="py-2.5 px-3 text-text-muted">{scan.timestamp}</td>
+                      <td className="py-2.5 px-3 text-end" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenReport(scan)}
+                          disabled={isCurrentLoading}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border border-border bg-surface hover:bg-accent hover:text-accent-text transition-colors"
+                        >
+                          {isCurrentLoading ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Eye className="w-3.5 h-3.5 text-primary" />
+                          )}
+                          <span>{t("inspect") || "Inspect"}</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </section>
+
+      {/* Full Audit Report Preview Modal */}
+      <ReportPreviewModal
+        isOpen={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        report={selectedReport}
+        onOpenInScanner={() => {
+          setPreviewOpen(false);
+          navigate("/scan");
+        }}
+      />
     </div>
   );
 }

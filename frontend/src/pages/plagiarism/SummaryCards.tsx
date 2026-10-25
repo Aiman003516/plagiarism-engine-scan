@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { ShieldCheck, AlertTriangle, FileCode2, Clock, FileWarning, ChevronDown, ChevronUp } from 'lucide-react';
 
 export interface SummaryCardsProps {
@@ -55,7 +55,7 @@ export function SummaryCards({ scanResult, scanDuration }: SummaryCardsProps) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-card dark:bg-slate-800 border border-border/50 dark:border-slate-700 rounded-xl p-4 text-center shadow-sm">
           <div className={`text-3xl font-bold ${getVerdictColor(verdict)}`}>
-            {scanResult.overall_similarity}%
+            {Number(scanResult?.overall_similarity ?? 0)}%
           </div>
           <div className="text-xs text-text-muted mt-1 font-medium">Overall Similarity</div>
         </div>

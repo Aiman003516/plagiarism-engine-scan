@@ -109,12 +109,12 @@ export default function ForceChangePassword() {
                 {t("current_password")}
               </label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+                <Lock className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
                 <input
                   type="password"
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="input-field w-full pl-9"
+                  className="input-field w-full ps-9"
                   placeholder={t("current_password")}
                   autoComplete="current-password"
                 />
@@ -127,12 +127,12 @@ export default function ForceChangePassword() {
               {t("new_password")}
             </label>
             <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+              <Lock className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
               <input
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="input-field w-full pl-9"
+                className="input-field w-full ps-9"
                 placeholder={t("new_password")}
                 autoComplete="new-password"
               />
@@ -144,12 +144,12 @@ export default function ForceChangePassword() {
               {t("confirm_password")}
             </label>
             <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+              <Lock className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
               <input
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="input-field w-full pl-9"
+                className="input-field w-full ps-9"
                 placeholder={t("confirm_password")}
                 autoComplete="new-password"
               />

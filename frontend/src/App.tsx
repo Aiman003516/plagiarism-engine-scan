@@ -76,8 +76,8 @@ function ProtectedRoute() {
 
 function LoadingSpinner() {
   return (
-    <div className="flex items-center justify-center h-full bg-background">
-      <RefreshCw className="w-8 h-8 animate-spin text-accent" />
+    <div className="flex flex-1 w-full min-h-[60vh] items-center justify-center bg-background">
+      <RefreshCw className="w-8 h-8 animate-spin text-primary dark:text-accent" />
     </div>
   );
 }

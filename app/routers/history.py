@@ -1,33 +1,17 @@
-﻿"""Scan history endpoints (list / detail / delete)."""
+"""Scan history endpoints (list / detail / delete)."""
 
+import asyncio
 from typing import Dict, Any, Optional
 from fastapi import HTTPException, Depends
 
-
 from fastapi import APIRouter
 from app.dependencies import require_role
-from app.state import _load_history, _save_history
+from app.state import _load_history, _save_history, _load_history_summaries
 
 router = APIRouter(tags=["history"])
 
 
 # --- Scan history (list / detail / delete) ---
-def _history_summary(entry: Dict[str, Any]) -> Dict[str, Any]:
-    """Project a stored scan report down to the keys the frontend history list uses."""
-    return {
-        "id": entry.get("id", ""),
-        "project_name": entry.get("project_name", ""),
-        "scan_type": entry.get("scan_type", ""),
-        "overall_similarity": entry.get("overall_similarity", 0),
-        "code_similarity": entry.get("code_similarity", 0),
-        "text_similarity": entry.get("text_similarity", 0),
-        "verdict": entry.get("verdict", "SAFE"),
-        "total_files": entry.get("total_files", 0),
-        "total_loc": entry.get("total_loc", 0),
-        "timestamp": entry.get("timestamp", ""),
-    }
-
-
 def _find_history_report(report_id: str) -> Optional[Dict[str, Any]]:
     """Look up a stored report by scan id, falling back to a project's newest scan.
 
@@ -47,15 +31,17 @@ def _find_history_report(report_id: str) -> Optional[Dict[str, Any]]:
 
 @router.get("/api/plagiarism/history", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def get_scan_history():
-    """Return every stored scan report as a lightweight summary list."""
-    history = _load_history()
-    return {"reports": [_history_summary(entry) for entry in history]}
+    """Return every stored scan report as a lightweight summary list with in-memory caching."""
+    loop = asyncio.get_running_loop()
+    reports = await loop.run_in_executor(None, _load_history_summaries)
+    return {"reports": reports}
 
 
 @router.get("/api/plagiarism/history/{report_id}", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
 async def get_scan_history_detail(report_id: str):
     """Return one full scan report (comparisons, stats, languages, git metadata)."""
-    entry = _find_history_report(report_id)
+    loop = asyncio.get_running_loop()
+    entry = await loop.run_in_executor(None, lambda: _find_history_report(report_id))
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Scan report '{report_id}' not found")
 
@@ -83,9 +69,17 @@ async def get_scan_history_detail(report_id: str):
 @router.delete("/api/plagiarism/history/{report_id}", dependencies=[Depends(require_role("ministry_admin"))])
 async def delete_scan_history_report(report_id: str):
     """Delete a single stored scan report."""
-    history = _load_history()
-    remaining = [entry for entry in history if entry.get("id") != report_id]
-    if len(remaining) == len(history):
+    loop = asyncio.get_running_loop()
+
+    def _delete():
+        history = _load_history()
+        remaining = [entry for entry in history if entry.get("id") != report_id]
+        if len(remaining) == len(history):
+            return False
+        _save_history(remaining)
+        return True
+
+    found = await loop.run_in_executor(None, _delete)
+    if not found:
         raise HTTPException(status_code=404, detail=f"Scan report '{report_id}' not found")
-    _save_history(remaining)
     return {"status": "success", "message": f"Scan report '{report_id}' deleted"}

@@ -257,7 +257,7 @@ export default function Projects() {
                 : "text-text-muted hover:text-text-main hover:bg-surface"
             }`}
           >
-            <FolderOpen className="w-3.5 h-3.5" /> Project Repository
+            <FolderOpen className="w-3.5 h-3.5" /> {t("tab_all_projects") || "Project Repository"}
           </button>
           <button
             onClick={() => setActiveTab("semantic")}
@@ -267,7 +267,7 @@ export default function Projects() {
                 : "text-text-muted hover:text-text-main hover:bg-surface"
             }`}
           >
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" /> AI Semantic Proposal Search
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" /> {t("tab_ai_search") || "AI Semantic Proposal Search"}
           </button>
         </div>
       </header>
@@ -287,14 +287,14 @@ export default function Projects() {
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-text-main flex items-center gap-2">
-                      Graduation Proposal Submission Status
+                      {t("proposal_submission_status") || "Graduation Proposal Submission Status"}
                       {studentTeam?.submission_allowed ? (
                         <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                          1-Time Window Active
+                          {t("token_active") || "1-Time Window Active"}
                         </span>
                       ) : (
                         <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-surface text-text-muted border border-glass-border">
-                          Submission Locked
+                          {t("token_locked") || "Submission Locked"}
                         </span>
                       )}
                     </h3>
@@ -313,7 +313,7 @@ export default function Projects() {
                     onClick={() => setShowSubmitModal(true)}
                     className="btn-primary flex items-center gap-2 whitespace-nowrap shadow-md"
                   >
-                    <Send className="w-4 h-4" /> Submit Proposal
+                    <Send className="w-4 h-4" /> {t("submit_proposal") || "Submit Proposal"}
                   </button>
                 )}
               </div>
@@ -322,11 +322,11 @@ export default function Projects() {
 
           <div className="mb-4 flex justify-end">
             <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+              <Search className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="input-field w-full pl-9"
+                className="input-field w-full ps-9"
                 placeholder={t("search_projects")}
               />
             </div>

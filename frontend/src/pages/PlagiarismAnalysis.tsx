@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Database, Search, RefreshCw, AlertTriangle, ShieldCheck, GitCompare, Eye, X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import {
@@ -24,6 +25,7 @@ import { handleStreamSession, useScanStreamReconnection } from './plagiarism/hoo
 import { useProjectsCache } from '../lib/useProjectsCache';
 
 export function PlagiarismAnalysis() {
+  const { t } = useTranslation();
   const location = useLocation();
   // Re-attach scan stream if a scanner scan is in flight
   useScanStreamReconnection("scanner");
@@ -259,10 +261,10 @@ export function PlagiarismAnalysis() {
         <div>
           <h1 className="text-2xl font-bold text-text-main flex items-center gap-2.5">
             <Database className="w-7 h-7 text-primary" />
-            Plagiarism Scanner & Analysis
+            {t("scanner_title") || "Plagiarism Scanner & Analysis"}
           </h1>
           <p className="text-text-muted text-sm mt-0.5">
-            Run system-wide scans, inspect direct pairwise file comparisons, or review past audit logs.
+            {t("scanner_subtitle") || "Run system-wide scans, inspect direct pairwise file comparisons, or review past audit logs."}
           </p>
         </div>
         <button
@@ -270,16 +272,16 @@ export function PlagiarismAnalysis() {
           className="bg-surface hover:bg-surface-hover border border-border rounded-xl px-4 py-2.5 flex items-center gap-2 text-xs font-semibold text-text-main transition-colors shrink-0 shadow-sm self-start sm:self-auto"
         >
           <History className="w-4 h-4 text-primary" />
-          Scan History & Audit Logs
+          {t("scan_history") || "Scan History & Audit Logs"}
         </button>
       </div>
 
       {/* Scanner Card */}
       <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-8 flex flex-col items-center shadow-sm">
         <Database className="w-16 h-16 text-primary mb-4" />
-        <h2 className="text-2xl font-bold mb-2">System-Wide Plagiarism Scanner</h2>
+        <h2 className="text-2xl font-bold mb-2 text-center">{t("tab_corpus") || "System-Wide Plagiarism Scanner"}</h2>
         <p className="text-text-muted text-center max-w-lg mb-8">
-          Select a project that has already been indexed into the database to instantly run a system-wide plagiarism scan.
+          {t("select_project_to_scan") || "Select a project that has already been indexed into the database to instantly run a system-wide plagiarism scan."}
         </p>
         <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md">
           <div className="flex-1 flex flex-col">
@@ -295,8 +297,8 @@ export function PlagiarismAnalysis() {
             >
               <option value="">
                 {loadingProjects && savedProjects.length === 0
-                  ? "Loading saved projects..."
-                  : "Select a saved project..."}
+                  ? (t("loading") || "Loading saved projects...")
+                  : (t("select_source_project") || "Select a saved project...")}
               </option>
               {selectedProject && !savedProjects.some((p: any) => p.id === selectedProject) && (
                 <option key={selectedProject} value={selectedProject}>
@@ -320,7 +322,7 @@ export function PlagiarismAnalysis() {
           {isScanning ? (
             <div className="flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-medium">
               <RefreshCw className="w-5 h-5 animate-spin" />
-              <span className="text-sm">Scanning...</span>
+              <span className="text-sm">{t("scanning") || "Scanning..."}</span>
             </div>
           ) : (
             <button 
@@ -329,7 +331,7 @@ export function PlagiarismAnalysis() {
               className="bg-accent hover:bg-accent-hover text-accent-text px-8 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap"
             >
               <Search className="w-5 h-5" />
-              Run Deep Scan
+              {t("start_deep_scan") || "Run Deep Scan"}
             </button>
           )}
         </div>
@@ -342,17 +344,17 @@ export function PlagiarismAnalysis() {
       <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-8 shadow-sm">
         <div className="flex items-center gap-3 mb-2">
           <Scale className="w-6 h-6 text-primary" />
-          <h2 className="text-xl font-bold text-text-main">Direct Document & File Pair Comparison</h2>
+          <h2 className="text-xl font-bold text-text-main">{t("tab_pairwise") || "Direct Document & File Pair Comparison"}</h2>
         </div>
         <p className="text-text-muted text-sm mb-6">
-          Upload any two files (PDF, Word DOCX, source code, or plain text) for an instant pairwise deep similarity check with score breakdown and side-by-side diff.
+          {t("pairwise_desc") || "Upload any two files (PDF, Word DOCX, source code, or plain text) for an instant pairwise deep similarity check with score breakdown and side-by-side diff."}
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           {/* File A Box */}
           <div className="rounded-xl p-4 border border-border dark:border-slate-700 bg-surface/30 flex flex-col">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-text-main">Document / File A</span>
+              <span className="text-xs font-bold text-text-main">{t("file_a") || "Document / File A"}</span>
               <div className="flex rounded-lg bg-surface border border-border p-0.5 text-xs">
                 <button
                   type="button"
@@ -462,7 +464,7 @@ export function PlagiarismAnalysis() {
           {/* File B Box */}
           <div className="rounded-xl p-4 border border-border dark:border-slate-700 bg-surface/30 flex flex-col">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-text-main">Document / File B</span>
+              <span className="text-xs font-bold text-text-main">{t("file_b") || "Document / File B"}</span>
               <div className="flex rounded-lg bg-surface border border-border p-0.5 text-xs">
                 <button
                   type="button"
@@ -581,7 +583,7 @@ export function PlagiarismAnalysis() {
             className="bg-primary hover:bg-primary-hover text-primary-text px-6 py-2.5 rounded-lg font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 text-xs shadow-sm"
           >
             {isComparingFiles ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Scale className="w-4 h-4" />}
-            {isComparingFiles ? 'Comparing Files...' : 'Compare Two Files'}
+            {isComparingFiles ? (t("comparing") || 'Comparing Files...') : (t("compare_files") || 'Compare Two Files')}
           </button>
         </div>
 
@@ -645,20 +647,20 @@ export function PlagiarismAnalysis() {
       <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-8 shadow-sm">
         <div className="flex items-center gap-3 mb-2">
           <GitCompare className="w-6 h-6 text-primary" />
-          <h2 className="text-xl font-bold text-text-main">Direct Project Comparison</h2>
+          <h2 className="text-xl font-bold text-text-main">{t("direct_project_comparison") || "Direct Project Comparison"}</h2>
         </div>
         <p className="text-text-muted text-sm mb-6">
-          Compare two indexed projects head-to-head and see exactly which files overlap.
+          {t("direct_project_comparison_desc") || "Compare two indexed projects head-to-head and see exactly which files overlap."}
         </p>
 
-        <div className="flex flex-col md:flex-row gap-4 w-full">
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-4 w-full items-center">
           <select
-            className="flex-1 bg-background dark:bg-slate-900 border border-border dark:border-slate-700 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary/20 outline-none text-text-main"
+            className="w-full min-w-0 bg-background dark:bg-slate-900 border border-border dark:border-slate-700 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary/20 outline-none text-text-main truncate"
             value={projectA}
             onChange={(e) => { setProjectA(e.target.value); setComparisonResult(null); setComparisonError(null); }}
           >
             <option value="">
-              {loadingProjects && savedProjects.length === 0 ? "Loading projects..." : "Select Project A..."}
+              {loadingProjects && savedProjects.length === 0 ? (t("loading") || "Loading projects...") : (t("select_source_project") || "Select Project A...")}
             </option>
             {projectA && !savedProjects.some((p: any) => p.id === projectA) && (
               <option key={`cmp-a-${projectA}`} value={projectA}>{projectA}</option>
@@ -668,12 +670,12 @@ export function PlagiarismAnalysis() {
             ))}
           </select>
           <select
-            className="flex-1 bg-background dark:bg-slate-900 border border-border dark:border-slate-700 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary/20 outline-none text-text-main"
+            className="w-full min-w-0 bg-background dark:bg-slate-900 border border-border dark:border-slate-700 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary/20 outline-none text-text-main truncate"
             value={projectB}
             onChange={(e) => { setProjectB(e.target.value); setComparisonResult(null); setComparisonError(null); }}
           >
             <option value="">
-              {loadingProjects && savedProjects.length === 0 ? "Loading projects..." : "Select Project B..."}
+              {loadingProjects && savedProjects.length === 0 ? (t("loading") || "Loading projects...") : (t("select_target_project") || "Select Project B...")}
             </option>
             {projectB && !savedProjects.some((p: any) => p.id === projectB) && (
               <option key={`cmp-b-${projectB}`} value={projectB}>{projectB}</option>
@@ -685,10 +687,10 @@ export function PlagiarismAnalysis() {
           <button
             disabled={!projectA || !projectB || projectA === projectB || isComparing}
             onClick={runComparison}
-            className="bg-primary text-primary-text px-6 py-3 rounded-lg font-medium hover:bg-primary/90 flex items-center justify-center gap-2 disabled:opacity-50 transition-all"
+            className="bg-primary text-primary-text px-6 py-3 rounded-lg font-medium hover:bg-primary/90 flex items-center justify-center gap-2 disabled:opacity-50 transition-all shrink-0 whitespace-nowrap"
           >
             {isComparing ? <RefreshCw className="w-5 h-5 animate-spin" /> : <GitCompare className="w-5 h-5" />}
-            {isComparing ? 'Comparing...' : 'Run Comparison'}
+            {isComparing ? (t("comparing") || "Comparing...") : (t("run_comparison") || "Run Comparison")}
           </button>
         </div>
 

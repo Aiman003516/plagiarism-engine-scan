@@ -1,11 +1,21 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { GitBranch, Globe, FileText, ShieldCheck, Code2, Search, RefreshCw, Info } from "lucide-react";
+import { GitBranch, Globe, FileText, ShieldCheck, Search, RefreshCw, Info, Edit3, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "react-hot-toast";
 import { useScanStore } from "../../lib/scanStore";
 import { GitRepoScanPayload, plagiarismApi } from "../../lib/api";
 import { handleStreamSession } from "./hooks/useScanStream";
+
+function extractRepoNameFromUrl(url: string): string {
+  try {
+    const clean = url.trim().replace(/\.git$/, "").replace(/\/+$/, "");
+    const parts = clean.split("/");
+    return parts[parts.length - 1] || "";
+  } catch {
+    return "";
+  }
+}
 
 export function GitScanSection() {
   const { t } = useTranslation();
@@ -15,10 +25,14 @@ export function GitScanSection() {
   const [gitBranch, setGitBranch] = useState<string>("main");
   const [gitAccessToken, setGitAccessToken] = useState<string>("");
   const [gitProjectTitle, setGitProjectTitle] = useState<string>("");
+  const [showCustomTitle, setShowCustomTitle] = useState(false);
 
   const isScanning = useScanStore((s) => s.isScanning);
   const scanSource = useScanStore((s) => s.scanSource);
   const isIntakeScanning = isScanning && (scanSource === "intake" || !scanSource);
+
+  const autoDetectedName = useMemo(() => extractRepoNameFromUrl(gitRepoUrl), [gitRepoUrl]);
+  const effectiveProjectName = gitProjectTitle.trim() || autoDetectedName || "git_project";
 
   // Start Git Repository Scan with Real-Time Streaming
   const startGitScan = async () => {
@@ -27,13 +41,7 @@ export function GitScanSection() {
       return;
     }
 
-    // Safely infer project name and prevent browser-autofill emails from contaminating it
-    let cleanProjectName = gitProjectTitle.trim();
-    if (!cleanProjectName || cleanProjectName.includes("@")) {
-      const cleanUrl = gitRepoUrl.trim().replace(/\.git$/, "").replace(/\/+$/, "");
-      const parts = cleanUrl.split("/");
-      cleanProjectName = parts[parts.length - 1] || "git_project";
-    }
+    const cleanProjectName = effectiveProjectName;
 
     // Reset previous terminal logs
     useScanStore.getState().resetScan();
@@ -95,9 +103,9 @@ export function GitScanSection() {
       animate={{ opacity: 1, y: 0 }}
       className="space-y-4"
     >
-      <div className="glass-card !p-6 space-y-6">
+      <div className="glass-card !p-6 space-y-6 rounded-2xl border border-border shadow-sm">
         <div className="flex items-start gap-4">
-          <div className="p-3.5 bg-primary/10 border border-primary/20 rounded-2xl text-primary">
+          <div className="p-3.5 bg-primary/10 border border-primary/20 rounded-2xl text-primary shrink-0">
             <GitBranch className="w-7 h-7" />
           </div>
           <div>
@@ -109,16 +117,24 @@ export function GitScanSection() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Repo URL */}
           <div className="space-y-1.5 md:col-span-2">
-            <label className="text-xs font-semibold text-text-main flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5 text-primary dark:text-accent" />
-              {t("git_repo_url")} <span className="text-red-500 dark:text-red-400">*</span>
+            <label className="text-xs font-semibold text-text-main flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-primary dark:text-accent" />
+                {t("git_repo_url")} <span className="text-rose-500">*</span>
+              </span>
+              {autoDetectedName && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-accent/20 text-accent-text border border-accent/30">
+                  <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                  Auto: {autoDetectedName}
+                </span>
+              )}
             </label>
             <input 
               type="text"
               placeholder={t("git_repo_url_placeholder")}
               value={gitRepoUrl}
               onChange={(e) => setGitRepoUrl(e.target.value)}
-              className="w-full bg-surface/50 border border-glass-border rounded-xl px-4 py-2.5 text-sm text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 font-mono"
+              className="input-field w-full font-mono text-xs py-2.5"
             />
           </div>
 
@@ -133,29 +149,12 @@ export function GitScanSection() {
               placeholder="main"
               value={gitBranch}
               onChange={(e) => setGitBranch(e.target.value)}
-              className="w-full bg-surface/50 border border-glass-border rounded-xl px-4 py-2.5 text-sm text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 font-mono"
-            />
-          </div>
-
-          {/* Project / Thesis Name */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-text-main flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
-              {t("git_project_name")}
-            </label>
-            <input 
-              type="text"
-              autoComplete="off"
-              name="git_repo_project_title_no_autofill"
-              placeholder={t("git_project_name_placeholder")}
-              value={gitProjectTitle}
-              onChange={(e) => setGitProjectTitle(e.target.value)}
-              className="w-full bg-surface/50 border border-glass-border rounded-xl px-4 py-2.5 text-sm text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/20"
+              className="input-field w-full font-mono text-xs py-2.5"
             />
           </div>
 
           {/* Access Token (Optional) */}
-          <div className="space-y-1.5 md:col-span-2">
+          <div className="space-y-1.5">
             <label className="text-xs font-semibold text-text-muted flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400" />
               {t("git_token_label")}
@@ -163,54 +162,79 @@ export function GitScanSection() {
             <input 
               type="password"
               autoComplete="new-password"
-              name="git_token_secure_field"
               placeholder={t("git_token_placeholder")}
               value={gitAccessToken}
               onChange={(e) => setGitAccessToken(e.target.value)}
-              className="w-full bg-surface/50 border border-glass-border rounded-xl px-4 py-2.5 text-sm text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 font-mono"
+              className="input-field w-full font-mono text-xs py-2.5"
             />
           </div>
-        </div>
 
-        {/* Ingestion Specs Note */}
-        <div className="p-4 rounded-xl bg-surface/30 border border-glass-border flex items-center justify-between text-xs text-text-muted">
-          <span className="flex items-center gap-2">
-            <Info className="w-4 h-4 text-primary dark:text-accent shrink-0" />
-            <span>Shallow Clone depth=1 • Automated .gitignore bloat exclusion • Ephemeral secure sandbox</span>
-          </span>
-          <span className="font-semibold text-emerald-600 dark:text-emerald-400">Security Gate: Active</span>
-        </div>
-      </div>
-
-      {/* PRIMARY CTA FOR GIT SCAN */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 glass-card !p-5">
-        <div className="flex items-center gap-3">
-          <div className="p-3 bg-primary/10 rounded-xl border border-primary/30 text-primary">
-            <Code2 className="w-6 h-6" />
+          {/* Optional Title Override Toggle */}
+          <div className="md:col-span-2 pt-1">
+            {!showCustomTitle ? (
+              <button
+                type="button"
+                onClick={() => setShowCustomTitle(true)}
+                className="text-xs text-text-muted hover:text-text-main flex items-center gap-1.5 transition-colors"
+              >
+                <Edit3 className="w-3 h-3 text-primary" />
+                <span>Specify Custom Project / Thesis Title (Optional)</span>
+              </button>
+            ) : (
+              <div className="space-y-1.5 p-3.5 rounded-xl bg-surface/50 border border-border/60">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-text-main flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-primary" />
+                    Custom Project / Thesis Title
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCustomTitle(false);
+                      setGitProjectTitle("");
+                    }}
+                    className="text-[11px] text-text-muted hover:text-text-main"
+                  >
+                    Reset to auto-detected
+                  </button>
+                </div>
+                <input 
+                  type="text"
+                  placeholder={autoDetectedName || "e.g. Autonomous SLAM Quadrotor"}
+                  value={gitProjectTitle}
+                  onChange={(e) => setGitProjectTitle(e.target.value)}
+                  className="input-field w-full text-xs py-2"
+                />
+              </div>
+            )}
           </div>
-          <div>
-            <h3 className="text-sm font-bold text-text-main">{t("git_repo_card_title")}</h3>
-            <p className="text-xs text-text-muted">{t("nat_registry_active")}</p>
-          </div>
         </div>
 
-        <button 
-          onClick={startGitScan}
-          disabled={isIntakeScanning || !gitRepoUrl.trim()}
-          className="w-full sm:w-auto bg-primary hover:bg-primary-hover text-primary-text font-bold text-base rounded-xl px-8 py-3.5 shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
-        >
-          {isIntakeScanning ? (
-            <>
-              <RefreshCw className="w-5 h-5 animate-spin" />
-              {t("processing_files")}
-            </>
-          ) : (
-            <>
-              <Search className="w-5 h-5" />
-              {t("clone_index_repo")}
-            </>
-          )}
-        </button>
+        {/* Unified Card Footer: Security Gate info on start, Action CTA on end */}
+        <div className="pt-4 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2 text-xs text-text-muted">
+            <Info className="w-4 h-4 text-primary shrink-0" />
+            <span>Shallow clone depth=1 • Ephemeral sandbox • Safe indexing</span>
+          </div>
+
+          <button 
+            onClick={startGitScan}
+            disabled={isIntakeScanning || !gitRepoUrl.trim()}
+            className="btn-primary w-full sm:w-auto px-6 py-2.5 text-sm font-semibold shrink-0"
+          >
+            {isIntakeScanning ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                {t("processing_files")}
+              </>
+            ) : (
+              <>
+                <Search className="w-4 h-4" />
+                {t("clone_index_repo")}
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </motion.div>
   );
