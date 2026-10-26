@@ -190,7 +190,7 @@ const translations = {
 
     // Plagiarism Detection & Multi-Upload
     "plagiarism_title": "Academic Integrity & Plagiarism Detection",
-    "plagiarism_desc": "Hybrid AST CodeBERT parsing and Multilingual BGE-M3/ArabERT NLP Ensembles. Cross-checks project submissions against Yemeni universities centralized repositories with intelligent bloat filtering.",
+    "plagiarism_desc": "Central submission and cataloging portal for Yemeni universities graduation projects and academic research.",
     "scan_history": "Scan History",
     "project_intake_title": "Project Submission & Multi-Source Intake",
     "project_intake_desc": "Upload full project folders, supplementary documents, or zip archives. Large virtual environments & binary folders are automatically filtered.",
@@ -439,6 +439,8 @@ const translations = {
     // Dashboard
     "avg_fusion_score": "Avg Fusion Score",
     "scan_verdicts_distribution": "Scan Verdicts Distribution",
+    "total_scans_logged": "Total Scans Logged",
+    "verdict_analytics_desc": "Comprehensive verdict distribution across all historical plagiarism audit scans in the system.",
     "inspect": "Inspect",
     "click_to_inspect": "Click to inspect full audit report",
     "safe": "SAFE",
@@ -471,12 +473,15 @@ const translations = {
 
     // Scanner & Comparison Tabs
     "scanner_title": "Plagiarism Scanner",
-    "scanner_subtitle": "Multi-engine hybrid code & text plagiarism detection with AST and semantic embeddings",
+    "scanner_subtitle": "National academic integrity verification for graduation projects, source code, and scientific research",
     "tab_corpus": "Corpus Deep Scan",
     "tab_pairwise": "Pairwise File Check",
     "tab_pairwise_file": "Direct File Pairwise",
+    "pairwise_desc": "Direct pairwise comparison between two files (code or documents) with semantic overlap breakdown and visual side-by-side diff.",
     "tab_project_comparison": "Project-vs-Project",
     "tab_pairwise_project": "Project Comparison",
+    "engine_architecture_title": "Multi-Engine AI Architecture",
+    "engine_architecture_detail": "Powered by UniXcoder CodeBERT, Multilingual BGE-M3, AST structural trees & ArabERT",
     "direct_project_comparison": "Direct Project Comparison",
     "direct_project_comparison_desc": "Select two registered projects from the database for direct end-to-end AST and text similarity comparison.",
     "select_source_project": "Select Source Project...",
@@ -723,7 +728,7 @@ const translations = {
 
     // Plagiarism Detection & Multi-Upload
     "plagiarism_title": "النزاهة الأكاديمية وفحص الانتحال العلمي",
-    "plagiarism_desc": "محرك هجين يعتمد على مطابقة شجرة القواعد المجردة CodeBERT ونماذج معالجة اللغة الطبيعية BGE-M3/ArabERT مع فحص المستودعات المركزية للجامعات اليمنية وتصفية المخلفات البرمجية.",
+    "plagiarism_desc": "بوابة استلام وأرشفة مشاريع التخرج والأبحاث العلمية المعتمدة للجامعات اليمنية ومطابقتها مركزياً.",
     "scan_history": "سجل عمليات الفحص",
     "project_intake_title": "استقبال ملفات ومجلدات المشروع المتعددة",
     "project_intake_desc": "رفع مجلدات المشاريع بالكامل، المستندات التكميلية، أو الأرشيفات المضغوطة. يتم استبعاد البيئات الافتراضية والملفات الثنائية تلقائيًا.",
@@ -973,6 +978,8 @@ const translations = {
     // Dashboard
     "avg_fusion_score": "متوسط درجة التطابق",
     "scan_verdicts_distribution": "توزيع نتائج الفحص",
+    "total_scans_logged": "إجمالي عمليات الفحص المسجلة",
+    "verdict_analytics_desc": "تحليل شامل لنتائج ومؤشرات الانتحال لكافة عمليات الفحص المسجلة في قاعدة البيانات.",
     "inspect": "معاينة",
     "click_to_inspect": "انقر لمعاينة تقرير التدقيق الكامل",
     "safe": "سليم",
@@ -1005,12 +1012,15 @@ const translations = {
 
     // Scanner & Comparison Tabs
     "scanner_title": "فاحص الانتحال الأكاديمي",
-    "scanner_subtitle": "كشف متقدم متعدد المحركات للاحتيال البرمجي والنصي بالاعتماد على التحليل القواعدي والتضمينات الدلالية",
+    "scanner_subtitle": "المنظومة الوطنية للفحص البرمجي والنصي المتقدم ومطابقة النزاهة الأكاديمية",
     "tab_corpus": "فحص شامل للمستودع",
     "tab_pairwise": "مقارنة مباشرة بين ملفين",
     "tab_pairwise_file": "مقارنة ملفين مباشرين",
+    "pairwise_desc": "مقارنة مباشرة بين ملفين (برمجيين أو وثائق) مع تفصيل نسب التطابق الدلالي والتركيبي وعرض الفروقات جنباً إلى جنب.",
     "tab_project_comparison": "مقارنة مباشرة بين مشروعين",
     "tab_pairwise_project": "مقارنة مشروعين كاملين",
+    "engine_architecture_title": "معمارية الذكاء الاصطناعي الهجينة",
+    "engine_architecture_detail": "مدعوم بنماذج UniXcoder CodeBERT و BGE-M3 متعدد اللغات والتحليل القواعدي AST و ArabERT",
     "direct_project_comparison": "مقارنة مباشرة بين مشروعين",
     "direct_project_comparison_desc": "اختر مشروعين مسجلين في قاعدة البيانات لإجراء مقارنة برمجية ونصية مباشرة وشاملة.",
     "select_source_project": "اختر المشروع المصدر...",

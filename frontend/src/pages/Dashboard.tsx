@@ -336,11 +336,11 @@ export default function Dashboard() {
               {t("scan_verdicts_distribution") || "Historical Audit Scans Distribution"}
             </h2>
             <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-surface border border-border text-text-muted">
-              {stats.total_scans ? `${stats.total_scans} Total Scans Logged` : "144 Total Scans"}
+              {stats.total_scans ? `${stats.total_scans} ${t("total_scans_logged")}` : `144 ${t("total_scans_logged")}`}
             </span>
           </div>
           <p className="text-xs text-text-muted mb-3.5">
-            Aggregated verdict breakdown across all historical plagiarism audit scans executed in the engine (separate from the 18 indexed projects).
+            {t("verdict_analytics_desc")}
           </p>
           <div className="flex h-6 rounded-full overflow-hidden">
             <div className="bg-green-500 hover:opacity-80 transition-opacity" style={{ flex: stats.verdicts_distribution.SAFE || 0 }} title={`SAFE: ${stats.verdicts_distribution.SAFE || 0}`} />

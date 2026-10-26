@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, X, UploadCloud, ShieldAlert, Code2,
-  History, Clock, Eye, Trash2, RefreshCw
+  History, Clock, Eye, Trash2, RefreshCw, Cpu
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
@@ -82,10 +82,19 @@ export function Plagiarism() {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex flex-col gap-1.5">
-          <h1 className="text-2xl font-bold text-text-main flex items-center gap-3">
-            <ShieldAlert className="w-7 h-7 text-primary dark:text-accent" />
-            {t("plagiarism_title")}
-          </h1>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl font-bold text-text-main flex items-center gap-3">
+              <ShieldAlert className="w-7 h-7 text-primary dark:text-accent" />
+              {t("plagiarism_title")}
+            </h1>
+            <span 
+              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-primary/10 text-primary border border-primary/20 dark:bg-accent/10 dark:text-accent dark:border-accent/20 cursor-help" 
+              title={t("engine_architecture_detail")}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              {t("engine_architecture_title")}
+            </span>
+          </div>
           <p className="text-text-muted text-sm max-w-3xl leading-relaxed">
             {t("plagiarism_desc")}
           </p>
