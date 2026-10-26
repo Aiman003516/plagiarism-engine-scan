@@ -1,14 +1,16 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Shield, Mail, Lock, Loader2, Globe } from "lucide-react";
+import { Shield, Mail, Lock, Loader2, Globe, Sun, Moon } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { authApi } from "../lib/api";
+import { useDarkMode } from "../lib/useTheme";
 
 export default function Login() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const [isDark, toggleDarkMode] = useDarkMode();
   // One field for both identities: an email (staff/admin) or an enrollment ID
   // (student). The backend resolves it against the users then students table.
   const [identifier, setIdentifier] = useState("");
@@ -53,16 +55,30 @@ export default function Login() {
 
   return (
     <div className="relative min-h-screen w-full flex items-center justify-center bg-background p-4">
-      {/* 1-Click Language Switcher Pill */}
-      <div className="absolute top-4 end-4 z-10">
+      {/* Top Floating Controls: Dark Mode & Icon-Only Language Switcher */}
+      <div className="absolute top-4 end-4 z-10 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={toggleDarkMode}
+          className="p-2.5 rounded-xl border border-border bg-surface/80 backdrop-blur text-text-muted hover:text-text-main hover:bg-surface-hover transition-all duration-200 shadow-sm flex items-center justify-center"
+          title={isDark ? (t("light_mode") || "Light Mode") : (t("dark_mode") || "Dark Mode")}
+          aria-label="Toggle dark mode"
+        >
+          {isDark ? (
+            <Sun className="w-4 h-4 text-amber-500" />
+          ) : (
+            <Moon className="w-4 h-4 text-indigo-400" />
+          )}
+        </button>
+
         <button
           type="button"
           onClick={toggleLanguage}
-          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-border bg-surface/80 backdrop-blur text-xs font-semibold text-text-main hover:bg-accent hover:text-accent-text transition-all duration-200 shadow-sm"
-          title={i18n.language === "ar" ? "Switch to English" : "التبديل إلى العربية"}
+          className="p-2.5 rounded-xl border border-border bg-surface/80 backdrop-blur text-primary hover:bg-surface-hover hover:border-primary/40 transition-all duration-200 shadow-sm flex items-center justify-center"
+          title={i18n.language === "ar" ? "English" : "العربية"}
+          aria-label="Toggle language"
         >
           <Globe className="w-4 h-4 text-primary" />
-          <span>{i18n.language === "ar" ? "English" : "العربية"}</span>
         </button>
       </div>
 

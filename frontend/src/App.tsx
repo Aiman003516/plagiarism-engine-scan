@@ -83,6 +83,7 @@ function LoadingSpinner() {
 }
 
 import { useScanStreamReconnection } from "./pages/plagiarism/hooks/useScanStream";
+import { useDarkMode } from "./lib/useTheme";
 
 /**
  * AppLayout — authenticated shell: sidebar + scrollable content region.
@@ -112,6 +113,7 @@ function AppLayout() {
 }
 
 export default function App() {
+  useDarkMode();
   return (
     <BrowserRouter>
       <Toaster

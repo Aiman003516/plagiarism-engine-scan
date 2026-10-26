@@ -23,23 +23,7 @@ import {
   Globe,
 } from "lucide-react";
 import { useScanStore } from "./lib/scanStore";
-
-function useDarkMode() {
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const stored = localStorage.getItem("theme");
-    if (stored) return stored === "dark";
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
-  });
-
-  useEffect(() => {
-    if (isDark) document.documentElement.classList.add("dark");
-    else document.documentElement.classList.remove("dark");
-    localStorage.setItem("theme", isDark ? "dark" : "light");
-  }, [isDark]);
-
-  return [isDark, () => setIsDark((d) => !d)] as const;
-}
+import { useDarkMode } from "./lib/useTheme";
 
 interface NavItem {
   to: string;
@@ -151,14 +135,11 @@ function Sidebar() {
           <button
             type="button"
             onClick={toggleLanguage}
-            className="flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold text-text-muted hover:bg-text-muted/10 hover:text-text-main transition-colors border border-border/70"
+            className="flex items-center justify-center p-2 rounded-xl text-primary hover:bg-text-muted/10 hover:text-text-main transition-colors border border-border/70"
             title={i18n.language === "ar" ? "Switch to English" : "التبديل إلى العربية"}
             aria-label="Toggle language"
           >
-            <Globe className="w-4 h-4 flex-shrink-0 text-primary" />
-            <span className="text-xs font-bold text-primary">
-              {i18n.language === "ar" ? "EN" : "عربي"}
-            </span>
+            <Globe className="w-4 h-4 flex-shrink-0" />
           </button>
         </div>
 
