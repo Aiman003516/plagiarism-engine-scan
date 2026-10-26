@@ -173,16 +173,42 @@ def _load_history_summaries() -> List[Dict[str, Any]]:
         return summaries
 
 
+def _sanitize_history_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Prune zero-similarity comparisons to prevent multi-megabyte JSON bloat."""
+    if not isinstance(entry, dict):
+        return entry
+    comps = entry.get("comparisons")
+    if not isinstance(comps, list) or not comps:
+        return entry
+
+    def _score(c):
+        s = c.get("similarity", 0) or c.get("overall_similarity", 0) or c.get("composite_score", 0)
+        if isinstance(s, str):
+            try:
+                return float(s.replace("%", "").strip())
+            except ValueError:
+                return 0.0
+        return float(s) if isinstance(s, (int, float)) else 0.0
+
+    meaningful = [c for c in comps if isinstance(c, dict) and _score(c) > 0]
+    if len(meaningful) > 100:
+        meaningful.sort(key=_score, reverse=True)
+        meaningful = meaningful[:100]
+    entry["comparisons"] = meaningful
+    return entry
+
+
 def _save_history(history: List[Dict[str, Any]]):
     global _history_cache, _history_summaries_cache, _history_mtime_ns
     with _history_lock:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         temp_fd, temp_path = tempfile.mkstemp(dir=DATA_DIR, prefix="history_tmp_", suffix=".json")
         try:
+            sanitized = [_sanitize_history_entry(dict(e)) for e in history]
             with open(temp_fd, "w", encoding="utf-8") as f:
-                json.dump(history, f, indent=2, default=str)
+                json.dump(sanitized, f, indent=2, default=str)
             os.replace(temp_path, HISTORY_FILE)
-            _history_cache = history
+            _history_cache = sanitized
             _history_summaries_cache = None
             try:
                 _history_mtime_ns = HISTORY_FILE.stat().st_mtime_ns

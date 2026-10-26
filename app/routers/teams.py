@@ -345,6 +345,13 @@ async def add_team_member_endpoint(team_id: str, payload: TeamMemberAdd, current
                 return "CROSS_COLLEGE_STUDENT", None
 
         db.add_team_member(team_id, student["id"])
+        if team_college and caller_role in ("ministry_admin", "university_admin"):
+            conn = db._get_connection()
+            cur = conn.cursor()
+            q = "UPDATE students SET college_id = %s WHERE id = %s" if db.mode == "postgresql" else "UPDATE students SET college_id = ? WHERE id = ?"
+            cur.execute(q, (team_college, student["id"]))
+            conn.commit()
+            conn.close()
         return "OK", db.get_team_members(team_id)
 
     status, members = await loop.run_in_executor(None, _add)

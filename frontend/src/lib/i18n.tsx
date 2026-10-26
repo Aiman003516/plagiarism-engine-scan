@@ -190,7 +190,7 @@ const translations = {
 
     // Plagiarism Detection & Multi-Upload
     "plagiarism_title": "Academic Integrity & Plagiarism Detection",
-    "plagiarism_desc": "Hybrid AST CodeBERT parsing and Multilingual BGE-M3/ArabERT NLP Ensembles. Cross-checks project submissions against Egyptian universities centralized repositories with intelligent bloat filtering.",
+    "plagiarism_desc": "Hybrid AST CodeBERT parsing and Multilingual BGE-M3/ArabERT NLP Ensembles. Cross-checks project submissions against Yemeni universities centralized repositories with intelligent bloat filtering.",
     "scan_history": "Scan History",
     "project_intake_title": "Project Submission & Multi-Source Intake",
     "project_intake_desc": "Upload full project folders, supplementary documents, or zip archives. Large virtual environments & binary folders are automatically filtered.",
@@ -232,9 +232,9 @@ const translations = {
     "scan_phase_1": "Initializing Dual-Engine Scanners...",
     "scan_phase_2": "Extracting AST Abstract Syntax Trees & Token Fingerprints...",
     "scan_phase_3": "Normalizing Arabic text & generating 1024-D SBERT embeddings...",
-    "scan_phase_4": "Querying Egyptian Universities MinHash LSH Index...",
+    "scan_phase_4": "Querying Yemeni Universities MinHash LSH Index...",
     "scan_phase_5": "Calculating Weighted Composite Similarity Score...",
-    "score_safe_title": "Safe: Meets Supreme Council Requirements (<25%)",
+    "score_safe_title": "Safe: Meets Academic Council Requirements (<25%)",
     "score_safe_desc": "No structural infringement or unauthorized copying detected.",
     "score_mod_title": "Moderate Similarity Detected (Requires Manual Faculty Review)",
     "score_mod_desc": "Some structural or text overlaps detected. Please inspect matches below.",
@@ -248,7 +248,7 @@ const translations = {
     "var_rename_detected": "Variable Renaming Detected",
     "arabic_norm_active": "Arabic Diacritic Normalization",
     "cross_lingual_match": "Cross-Lingual Match (AR-EN)",
-    "matched_db_title": "Matched Egyptian Universities Database",
+    "matched_db_title": "Matched Yemeni Universities Database",
     "filter_all_matches": "All Matches",
     "filter_critical": "Critical (>80%)",
     "filter_moderate": "Moderate (50-80%)",
@@ -420,7 +420,7 @@ const translations = {
     "copied": "Copied to clipboard!",
 
     // Navigation & Brand
-    "ministry_system": "National Academic Verification System",
+    "ministry_system": "NAZAHA • Academic Integrity",
     "project_intake": "Project Intake",
     "projects_search": "Projects & AI Search",
     "my_team": "My Team",
@@ -721,7 +721,7 @@ const translations = {
 
     // Plagiarism Detection & Multi-Upload
     "plagiarism_title": "النزاهة الأكاديمية وفحص الانتحال العلمي",
-    "plagiarism_desc": "محرك هجين يعتمد على مطابقة شجرة القواعد المجردة CodeBERT ونماذج معالجة اللغة الطبيعية BGE-M3/ArabERT مع فحص المستودعات الجامعية المصرية وتصفية المخلفات البرمجية.",
+    "plagiarism_desc": "محرك هجين يعتمد على مطابقة شجرة القواعد المجردة CodeBERT ونماذج معالجة اللغة الطبيعية BGE-M3/ArabERT مع فحص المستودعات المركزية للجامعات اليمنية وتصفية المخلفات البرمجية.",
     "scan_history": "سجل عمليات الفحص",
     "project_intake_title": "استقبال ملفات ومجلدات المشروع المتعددة",
     "project_intake_desc": "رفع مجلدات المشاريع بالكامل، المستندات التكميلية، أو الأرشيفات المضغوطة. يتم استبعاد البيئات الافتراضية والملفات الثنائية تلقائيًا.",
@@ -763,9 +763,9 @@ const translations = {
     "scan_phase_1": "تهيئة الماسحات الثنائية الذكية...",
     "scan_phase_2": "استخراج أشجار القواعد المجردة AST وبصمات الرموز...",
     "scan_phase_3": "تطبيع النصوص العربية وتوليد متجهات SBERT ذات 1024 بُعد...",
-    "scan_phase_4": "الاستعلام عن مؤشر MinHash LSH للجامعات المصرية...",
+    "scan_phase_4": "الاستعلام عن مؤشر MinHash LSH للجامعات اليمنية...",
     "scan_phase_5": "حساب معدل التشابه المركب الموزون...",
-    "score_safe_title": "آمن: يطابق اشتراطات المجلس الأعلى للجامعات (<25%)",
+    "score_safe_title": "آمن: يطابق اشتراطات المجلس الأكاديمي للجامعات (<25%)",
     "score_safe_desc": "لم يتم رصد أي انتهاك هيكلي أو نسخ غير مصرح به في الأكواد أو الوثائق.",
     "score_mod_title": "تم اكتشاف نسبة تشابه متوسطة (تتطلب مراجعة الأستاذ المشرف)",
     "score_mod_desc": "يوجد بعض التطابق الهيكلي أو النصي، يرجى فحص المطابقات أدناه.",
@@ -779,7 +779,7 @@ const translations = {
     "var_rename_detected": "إعادة تسمية المتغيرات المرصودة",
     "arabic_norm_active": "تطبيع التشكيل والحروف العربية",
     "cross_lingual_match": "تطابق لغوي مزدوج (عربي - إنجليزي)",
-    "matched_db_title": "قاعدة بيانات مطابقة الجامعات المصرية",
+    "matched_db_title": "قاعدة بيانات مطابقة الجامعات اليمنية",
     "filter_all_matches": "جميع المطابقات",
     "filter_critical": "حرجة (>80%)",
     "filter_moderate": "متوسطة (50-80%)",
@@ -952,7 +952,7 @@ const translations = {
     "copied": "تم النسخ إلى الحافظة!",
 
     // Navigation & Brand
-    "ministry_system": "نظام النزاهة الأكاديمية والتحقق الوطني",
+    "ministry_system": "نزاهة • النزاهة الأكاديمية",
     "project_intake": "استقبال المشاريع",
     "projects_search": "المشاريع والبحث الذكي",
     "my_team": "فريقي",

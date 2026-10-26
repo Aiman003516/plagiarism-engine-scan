@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Shield, Mail, Lock, Loader2, Languages } from "lucide-react";
+import { Shield, Mail, Lock, Loader2, Globe } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { authApi } from "../lib/api";
@@ -61,7 +61,7 @@ export default function Login() {
           className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-border bg-surface/80 backdrop-blur text-xs font-semibold text-text-main hover:bg-accent hover:text-accent-text transition-all duration-200 shadow-sm"
           title={i18n.language === "ar" ? "Switch to English" : "التبديل إلى العربية"}
         >
-          <Languages className="w-4 h-4 text-primary" />
+          <Globe className="w-4 h-4 text-primary" />
           <span>{i18n.language === "ar" ? "English" : "العربية"}</span>
         </button>
       </div>

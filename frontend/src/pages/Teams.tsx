@@ -22,6 +22,7 @@ export default function Teams() {
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newCollegeId, setNewCollegeId] = useState("");
   const [activeTeam, setActiveTeam] = useState<TeamData | null>(null);
   const [enrollment, setEnrollment] = useState("");
   const [saving, setSaving] = useState(false);
@@ -50,9 +51,13 @@ export default function Teams() {
     }
     setSaving(true);
     try {
-      await teamsApi.create({ name: newName.trim() });
+      await teamsApi.create({
+        name: newName.trim(),
+        college_id: newCollegeId.trim() || undefined,
+      });
       toast.success(t("create_team"));
       setNewName("");
+      setNewCollegeId("");
       setShowCreate(false);
       load();
     } catch (e: any) {
@@ -272,6 +277,22 @@ export default function Teams() {
               className="input-field w-full"
               placeholder={t("team_name")}
             />
+            {["ministry_admin", "university_admin"].includes(userRole) && (
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-text-main mb-1.5">
+                  {t("college") || "College ID / Institution (Optional)"}
+                </label>
+                <input
+                  value={newCollegeId}
+                  onChange={(e) => setNewCollegeId(e.target.value)}
+                  className="input-field w-full text-sm"
+                  placeholder="e.g. col_cs or Faculty of Computing"
+                />
+                <p className="text-[11px] text-text-muted mt-1">
+                  Assign this team to a specific college, or leave empty for general institution scope.
+                </p>
+              </div>
+            )}
             <div className="flex justify-end gap-3 mt-5">
               <button
                 onClick={() => setShowCreate(false)}
@@ -362,9 +383,24 @@ export default function Teams() {
                                 Current Member
                               </span>
                             ) : isAssignedOtherTeam ? (
-                              <span className="text-[11px] text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded">
-                                In {stu.team_name || "Another Team"}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px] text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">
+                                  In {stu.team_name || "Another Team"}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (window.confirm(`Transfer student "${stu.name}" to team "${activeTeam.name}"?`)) {
+                                      addMemberByEnrollment(stu.enrollment_number);
+                                    }
+                                  }}
+                                  disabled={saving}
+                                  className="px-2 py-0.5 rounded-lg text-xs font-semibold bg-amber-500/15 hover:bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1"
+                                  title="Transfer student from other team to this team"
+                                >
+                                  <UserPlus className="w-3 h-3" /> {t("transfer") || "Transfer"}
+                                </button>
+                              </div>
                             ) : (
                               <button
                                 onClick={() => addMemberByEnrollment(stu.enrollment_number)}

@@ -185,7 +185,7 @@ export default function Users() {
   };
 
   const handleDownloadTemplate = () => {
-    const csvContent = "name,enrollment_number,college,department,university\nAhmed Ali,20240101,College of Engineering,Computer Science,Baghdad University\nSara Hassan,20240102,College of Science,Artificial Intelligence,Mustansiriyah University\nMustafa Tareq,20240103,College of IT,Software Engineering,University of Technology";
+    const csvContent = "name,enrollment_number,college,department,university\nAhmed Ali,20240101,Faculty of Computer Science,Software Engineering,Sana'a University\nSara Hassan,20240102,Faculty of Engineering,Information Technology,Aden University\nMustafa Tareq,20240103,Faculty of Science,Computer Science,Taiz University";
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -463,7 +463,7 @@ export default function Users() {
                         value={form.university}
                         onChange={(e) => setForm({ ...form, university: e.target.value })}
                         className="input-field w-full text-sm"
-                        placeholder="e.g. Baghdad University"
+                        placeholder="e.g. Sana'a University"
                       />
                     </div>
                   </div>

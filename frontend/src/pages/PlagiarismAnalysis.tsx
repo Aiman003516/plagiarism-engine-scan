@@ -76,6 +76,7 @@ export function PlagiarismAnalysis() {
 
   const [selectedProject, setSelectedProject] = useState<string>(() => activeProjectId || '');
   const [deepScanResult, setDeepScanResult] = useState<DeepScanResult | null>(null);
+  const [scannerTab, setScannerTab] = useState<'corpus' | 'pairwise_file' | 'pairwise_project'>('corpus');
 
   // Keep selectedProject aligned if an active scan is running
   useEffect(() => {
@@ -276,79 +277,172 @@ export function PlagiarismAnalysis() {
         </button>
       </div>
 
-      {/* Scanner Card */}
-      <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-8 flex flex-col items-center shadow-sm">
-        <Database className="w-16 h-16 text-primary mb-4" />
-        <h2 className="text-2xl font-bold mb-2 text-center">{t("tab_corpus") || "System-Wide Plagiarism Scanner"}</h2>
-        <p className="text-text-muted text-center max-w-lg mb-8">
-          {t("select_project_to_scan") || "Select a project that has already been indexed into the database to instantly run a system-wide plagiarism scan."}
-        </p>
-        <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md">
-          <div className="flex-1 flex flex-col">
-            <select 
-              className="w-full bg-background border border-border rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary/20 outline-none text-text-main"
-              value={selectedProject}
-              onChange={(e) => {
-                setSelectedProject(e.target.value);
-                if (!isScanning) {
-                  useScanStore.getState().resetScan();
-                }
-              }}
-            >
-              <option value="">
-                {loadingProjects && savedProjects.length === 0
-                  ? (t("loading") || "Loading saved projects...")
-                  : (t("select_source_project") || "Select a saved project...")}
-              </option>
-              {selectedProject && !savedProjects.some((p: any) => p.id === selectedProject) && (
-                <option key={selectedProject} value={selectedProject}>
-                  {selectedProject}
-                </option>
-              )}
-              {savedProjects.map((p: any) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            {projectsError && savedProjects.length === 0 && (
-              <button
-                type="button"
-                onClick={() => refreshProjects()}
-                className="text-xs text-red-500 hover:underline flex items-center gap-1 mt-1.5 px-1"
-              >
-                <RefreshCw className="w-3 h-3" /> Failed to load projects. Click to retry.
-              </button>
-            )}
-          </div>
-          {isScanning ? (
-            <div className="flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-medium">
-              <RefreshCw className="w-5 h-5 animate-spin" />
-              <span className="text-sm">{t("scanning") || "Scanning..."}</span>
-            </div>
-          ) : (
-            <button 
-              onClick={runScan}
-              disabled={!selectedProject}
-              className="bg-accent hover:bg-accent-hover text-accent-text px-8 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap"
-            >
-              <Search className="w-5 h-5" />
-              {t("start_deep_scan") || "Run Deep Scan"}
-            </button>
-          )}
-        </div>
+      {/* 3 Dedicated Workflow Tabs */}
+      <div className="flex flex-wrap items-center gap-2 p-1.5 rounded-2xl bg-surface/70 border border-border/60 shadow-sm backdrop-blur">
+        <button
+          onClick={() => setScannerTab("corpus")}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 ${
+            scannerTab === "corpus"
+              ? "bg-primary text-primary-text shadow-sm"
+              : "text-text-muted hover:text-text-main hover:bg-surface"
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          <span>{t("tab_corpus") || "System-Wide Corpus Scan"}</span>
+        </button>
+
+        <button
+          onClick={() => setScannerTab("pairwise_file")}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 ${
+            scannerTab === "pairwise_file"
+              ? "bg-primary text-primary-text shadow-sm"
+              : "text-text-muted hover:text-text-main hover:bg-surface"
+          }`}
+        >
+          <Scale className="w-4 h-4" />
+          <span>{t("tab_pairwise_file") || "Direct File Pairwise"}</span>
+        </button>
+
+        <button
+          onClick={() => setScannerTab("pairwise_project")}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 ${
+            scannerTab === "pairwise_project"
+              ? "bg-primary text-primary-text shadow-sm"
+              : "text-text-muted hover:text-text-main hover:bg-surface"
+          }`}
+        >
+          <GitCompare className="w-4 h-4" />
+          <span>{t("tab_pairwise_project") || "Project vs Project Comparison"}</span>
+        </button>
       </div>
 
-      {/* Real-time Streaming Terminal */}
-      <ScanProgress scope="scanner" />
+      {/* Tab 1: System-Wide Corpus Scanner */}
+      {scannerTab === "corpus" && (
+        <div className="space-y-6">
+          <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-8 flex flex-col items-center shadow-sm">
+            <Database className="w-16 h-16 text-primary mb-4" />
+            <h2 className="text-2xl font-bold mb-2 text-center">{t("tab_corpus") || "System-Wide Plagiarism Scanner"}</h2>
+            <p className="text-text-muted text-center max-w-lg mb-8">
+              {t("select_project_to_scan") || "Select a project that has already been indexed into the database to instantly run a system-wide plagiarism scan."}
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md">
+              <div className="flex-1 flex flex-col">
+                <select 
+                  className="w-full bg-background border border-border rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary/20 outline-none text-text-main"
+                  value={selectedProject}
+                  onChange={(e) => {
+                    setSelectedProject(e.target.value);
+                    if (!isScanning) {
+                      useScanStore.getState().resetScan();
+                    }
+                  }}
+                >
+                  <option value="">
+                    {loadingProjects && savedProjects.length === 0
+                      ? (t("loading") || "Loading saved projects...")
+                      : (t("select_source_project") || "Select a saved project...")}
+                  </option>
+                  {selectedProject && !savedProjects.some((p: any) => p.id === selectedProject) && (
+                    <option key={selectedProject} value={selectedProject}>
+                      {selectedProject}
+                    </option>
+                  )}
+                  {savedProjects.map((p: any) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                {projectsError && savedProjects.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => refreshProjects()}
+                    className="text-xs text-red-500 hover:underline flex items-center gap-1 mt-1.5 px-1"
+                  >
+                    <RefreshCw className="w-3 h-3" /> Failed to load projects. Click to retry.
+                  </button>
+                )}
+              </div>
+              {isScanning ? (
+                <div className="flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-medium">
+                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <span className="text-sm">{t("scanning") || "Scanning..."}</span>
+                </div>
+              ) : (
+                <button 
+                  onClick={runScan}
+                  disabled={!selectedProject}
+                  className="bg-accent hover:bg-accent-hover text-accent-text px-8 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap"
+                >
+                  <Search className="w-5 h-5" />
+                  {t("start_deep_scan") || "Run Deep Scan"}
+                </button>
+              )}
+            </div>
+          </div>
 
-      {/* Direct File & Document Pair Review (Pair-to-Pair Comparison) */}
-      <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-8 shadow-sm">
-        <div className="flex items-center gap-3 mb-2">
-          <Scale className="w-6 h-6 text-primary" />
-          <h2 className="text-xl font-bold text-text-main">{t("tab_pairwise") || "Direct Document & File Pair Comparison"}</h2>
+          {/* Real-time Streaming Terminal */}
+          <ScanProgress scope="scanner" />
+
+          {/* Error Display */}
+          {scanError && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-5 text-red-600 dark:text-red-400 flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-sm">Scan Notification</div>
+                  <p className="text-xs mt-0.5 leading-relaxed">{scanError}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => useScanStore.getState().failScan('')}
+                className="text-text-muted hover:text-text-main p-1 transition-colors"
+                title="Dismiss notification"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Results Section */}
+          {scanResult && (
+            <>
+              <SummaryCards
+                scanResult={{
+                  overall_similarity: scanResult.overall_similarity,
+                  verdict: scanResult.verdict,
+                  total_files: scanResult.total_files || (scanResult.code_files_count || 0) + (scanResult.text_files_count || 0),
+                  code_files_count: scanResult.code_files_count || 0,
+                  text_files_count: scanResult.text_files_count || 0,
+                  total_loc: scanResult.total_loc || 0,
+                  languages_detected: scanResult.languages_detected,
+                  excluded_files: scanResult.excluded_files,
+                }}
+                scanDuration={scanDuration}
+              />
+
+              <ComparisonsTable
+                comparisons={comparisons}
+                activeDeepScans={activeDeepScans}
+                deepScanResultsCache={deepScanResultsCache}
+                onDeepScan={runDeepScan}
+                onViewDeepScanResult={(res) => setDeepScanResult(res)}
+              />
+            </>
+          )}
         </div>
-        <p className="text-text-muted text-sm mb-6">
-          {t("pairwise_desc") || "Upload any two files (PDF, Word DOCX, source code, or plain text) for an instant pairwise deep similarity check with score breakdown and side-by-side diff."}
-        </p>
+      )}
+
+      {/* Tab 2: Direct Document & File Pair Review */}
+      {scannerTab === "pairwise_file" && (
+        <div className="space-y-6">
+          <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-8 shadow-sm">
+            <div className="flex items-center gap-3 mb-2">
+              <Scale className="w-6 h-6 text-primary" />
+              <h2 className="text-xl font-bold text-text-main">{t("tab_pairwise") || "Direct Document & File Pair Comparison"}</h2>
+            </div>
+            <p className="text-text-muted text-sm mb-6">
+              {t("pairwise_desc") || "Upload any two files (PDF, Word DOCX, source code, or plain text) for an instant pairwise deep similarity check with score breakdown and side-by-side diff."}
+            </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           {/* File A Box */}
@@ -642,8 +736,12 @@ export function PlagiarismAnalysis() {
           </div>
         )}
       </div>
+    </div>
+  )}
 
-      {/* Direct Project Comparison */}
+  {/* Tab 3: Direct Project Comparison */}
+  {scannerTab === "pairwise_project" && (
+    <div className="space-y-6">
       <div className="bg-card dark:bg-slate-800/60 border border-border/50 dark:border-slate-700 rounded-xl p-8 shadow-sm">
         <div className="flex items-center gap-3 mb-2">
           <GitCompare className="w-6 h-6 text-primary" />
@@ -753,7 +851,7 @@ export function PlagiarismAnalysis() {
                           <button
                             onClick={() => setDiffTarget(m)}
                             title="View the matching lines side by side"
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border/60 dark:border-slate-600 text-text-muted hover:text-primary hover:border-primary/50 hover:bg-primary/10 transition-colors"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border/60 dark:border-slate-600 text-text-muted hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-colors"
                           >
                             <Eye className="w-4 h-4" />
                             <span className="text-xs font-medium">View Diff</span>
@@ -768,54 +866,8 @@ export function PlagiarismAnalysis() {
           </div>
         )}
       </div>
-
-      {/* Error Display */}
-      {scanError && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-5 text-red-600 dark:text-red-400 flex items-start justify-between gap-3">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-            <div>
-              <div className="font-bold text-sm">Scan Notification</div>
-              <p className="text-xs mt-0.5 leading-relaxed">{scanError}</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => useScanStore.getState().failScan('')}
-            className="text-text-muted hover:text-text-main p-1 transition-colors"
-            title="Dismiss notification"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Results Section */}
-      {scanResult && (
-        <>
-          <SummaryCards
-            scanResult={{
-              overall_similarity: scanResult.overall_similarity,
-              verdict: scanResult.verdict,
-              total_files: scanResult.total_files || (scanResult.code_files_count || 0) + (scanResult.text_files_count || 0),
-              code_files_count: scanResult.code_files_count || 0,
-              text_files_count: scanResult.text_files_count || 0,
-              total_loc: scanResult.total_loc || 0,
-              languages_detected: scanResult.languages_detected,
-              excluded_files: scanResult.excluded_files,
-            }}
-            scanDuration={scanDuration}
-          />
-
-          <ComparisonsTable
-            comparisons={comparisons}
-            activeDeepScans={activeDeepScans}
-            deepScanResultsCache={deepScanResultsCache}
-            onDeepScan={runDeepScan}
-            onViewDeepScanResult={(res) => setDeepScanResult(res)}
-          />
-        </>
-      )}
+    </div>
+  )}
 
       {/* Scan History Modal */}
       <ScanHistoryModal

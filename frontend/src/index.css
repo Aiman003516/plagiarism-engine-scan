@@ -192,6 +192,16 @@
   .btn-primary {
     @apply bg-primary hover:bg-primary-hover text-primary-text font-semibold rounded-lg px-4 py-2 shadow-sm transition-all flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
   }
+  .btn-primary:hover {
+    color: rgb(var(--primary-text)) !important;
+  }
+
+  .btn-accent, button.bg-accent, a.bg-accent {
+    color: rgb(var(--accent-text)) !important;
+  }
+  .btn-accent:hover, button.bg-accent:hover, a.bg-accent:hover, [class*="hover:bg-accent"]:hover {
+    color: rgb(var(--accent-text)) !important;
+  }
 
   .btn-secondary {
     @apply bg-surface hover:bg-surface-hover border border-border text-text-main font-medium rounded-lg px-4 py-2 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed;

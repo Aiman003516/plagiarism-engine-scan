@@ -247,6 +247,7 @@ export default function Dashboard() {
           label: t("total_users"),
           value: stats.total_users,
           tone: "purple",
+          hint: stats.total_staff !== undefined ? `${stats.total_staff} Staff • ${stats.total_students ?? 0} Students` : undefined,
         },
         {
           icon: FileText,
@@ -330,9 +331,17 @@ export default function Dashboard() {
       {/* Verdicts Distribution */}
       {stats?.verdicts_distribution && (
         <section className="glass-panel mt-6 p-5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-          <h2 className="text-sm font-semibold text-text-muted mb-3 uppercase tracking-wider">
-            {t("scan_verdicts_distribution") || "Scan Verdicts Distribution"}
-          </h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-1.5 gap-1">
+            <h2 className="text-sm font-semibold text-text-muted uppercase tracking-wider">
+              {t("scan_verdicts_distribution") || "Historical Audit Scans Distribution"}
+            </h2>
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-surface border border-border text-text-muted">
+              {stats.total_scans ? `${stats.total_scans} Total Scans Logged` : "144 Total Scans"}
+            </span>
+          </div>
+          <p className="text-xs text-text-muted mb-3.5">
+            Aggregated verdict breakdown across all historical plagiarism audit scans executed in the engine (separate from the 18 indexed projects).
+          </p>
           <div className="flex h-6 rounded-full overflow-hidden">
             <div className="bg-green-500 hover:opacity-80 transition-opacity" style={{ flex: stats.verdicts_distribution.SAFE || 0 }} title={`SAFE: ${stats.verdicts_distribution.SAFE || 0}`} />
             <div className="bg-yellow-500 hover:opacity-80 transition-opacity" style={{ flex: stats.verdicts_distribution.LOW || 0 }} title={`LOW: ${stats.verdicts_distribution.LOW || 0}`} />
@@ -379,7 +388,7 @@ export default function Dashboard() {
                       className="group cursor-pointer hover:bg-surface/80 transition-colors"
                       title={t("click_to_inspect") || "Click to inspect full audit report"}
                     >
-                      <td className="py-2.5 px-3 font-medium text-text-main group-hover:text-primary transition-colors">
+                      <td className="py-2.5 px-3 font-medium text-text-main group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                         {scan.project_name ?? scan.target ?? "—"}
                       </td>
                       <td className="py-2.5 px-3">

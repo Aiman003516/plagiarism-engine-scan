@@ -515,33 +515,44 @@ export function UploadSection() {
         </div>
       )}
 
-      {/* Academic & Project Metadata Card */}
-      <div className="glass-card !p-5">
-        <button
-          type="button"
-          onClick={() => setShowMetadata(!showMetadata)}
-          className="w-full flex items-center justify-between text-left"
-        >
+      {/* UNIFIED SUBMISSION & INDEXING CONTROL DOCK */}
+      <div className="glass-card !p-5 space-y-4">
+        {/* Dock Header: Engine Status & Metadata Toggle */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-glass-border">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-primary/10 rounded-xl border border-primary/20 text-primary">
-              <BookOpen className="w-5 h-5" />
+            <div className="p-2.5 bg-primary/10 rounded-xl border border-primary/20 text-primary flex-shrink-0">
+              <Cpu className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="text-sm font-bold text-text-main">Academic & Project Metadata</h4>
-              <p className="text-xs text-text-muted">
-                {showMetadata ? "Optional details for institutional cataloging and database records." : "Click to specify Title, Abstract, Department, Year, and University."}
-              </p>
+              <h4 className="text-sm font-bold text-text-main flex items-center gap-2">
+                <span>{t("codebert_title")} & {t("nlp_title")}</span>
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  Active
+                </span>
+              </h4>
+              <p className="text-xs text-text-muted">{t("nat_registry_active")}</p>
             </div>
           </div>
-          {showMetadata ? <ChevronUp className="w-4 h-4 text-text-muted" /> : <ChevronDown className="w-4 h-4 text-text-muted" />}
-        </button>
 
+          <button
+            type="button"
+            onClick={() => setShowMetadata(!showMetadata)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-glass-border bg-surface/50 hover:bg-surface text-xs font-semibold text-text-muted hover:text-text-main transition-colors self-start sm:self-auto"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-primary" />
+            <span>Academic Metadata</span>
+            {showMetadata ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+
+        {/* Optional Academic Metadata Drawer */}
         {showMetadata && (
-          <div className="mt-4 pt-4 border-t border-glass-border space-y-3">
+          <div className="p-4 rounded-xl bg-surface/40 border border-glass-border space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-text-muted mb-1 flex items-center gap-1.5">
-                  <BookOpen className="w-3.5 h-3.5" /> Full Project Title
+                  <BookOpen className="w-3.5 h-3.5 text-primary" /> Full Project Title
                 </label>
                 <input
                   type="text"
@@ -553,11 +564,11 @@ export function UploadSection() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-text-muted mb-1 flex items-center gap-1.5">
-                  <GraduationCap className="w-3.5 h-3.5" /> University / Institution
+                  <GraduationCap className="w-3.5 h-3.5 text-primary" /> University / Institution
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Stanford University"
+                  placeholder="e.g. Sana'a University"
                   value={metaUniversity}
                   onChange={(e) => setMetaUniversity(e.target.value)}
                   className="w-full bg-surface border border-glass-border rounded-lg px-3 py-2 text-xs text-text-main focus:outline-none focus:border-primary/50"
@@ -565,7 +576,7 @@ export function UploadSection() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-text-muted mb-1 flex items-center gap-1.5">
-                  <Building className="w-3.5 h-3.5" /> Department
+                  <Building className="w-3.5 h-3.5 text-primary" /> Department
                 </label>
                 <input
                   type="text"
@@ -577,7 +588,7 @@ export function UploadSection() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-text-muted mb-1 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5" /> Academic Year
+                  <Calendar className="w-3.5 h-3.5 text-primary" /> Academic Year
                 </label>
                 <input
                   type="number"
@@ -602,47 +613,50 @@ export function UploadSection() {
             </div>
           </div>
         )}
-      </div>
 
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 glass-card !p-5">
-        <div className="flex items-center gap-3">
-          <div className="p-3 bg-accent/15 rounded-xl border border-accent/30 text-primary dark:text-accent">
-            <Cpu className="w-6 h-6" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-text-main">{t("codebert_title")} & {t("nlp_title")}</h3>
-            <p className="text-xs text-text-muted">{t("nat_registry_active")}</p>
-          </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
-          {!isScanning && uploadedFiles.length > 0 && (
-            <button
-              onClick={clearUpload}
-              className="btn-danger w-full sm:w-auto px-6 py-3"
-            >
-              <Trash2 className="w-4 h-4" />
-              {t("clear_uploads", "Clear Uploads")}
-            </button>
-          )}
-
-          <button
-            onClick={startDirectScan}
-            disabled={isIntakeScanning || isProcessingFiles || isTraversing || uploadedFiles.length === 0}
-            className="w-full sm:w-auto bg-primary hover:bg-primary-hover text-primary-text font-bold text-base rounded-xl px-8 py-3.5 shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2.5 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
-          >
-            {isIntakeScanning ? (
-              <>
-                <RefreshCw className="w-5 h-5 animate-spin" />
-                {t("processing_files")}
-              </>
+        {/* Dock Bottom Actions */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-1">
+          <div className="text-xs text-text-muted">
+            {uploadedFiles.length > 0 ? (
+              <span className="font-medium text-text-main">
+                {uploadedFiles.length} file{uploadedFiles.length === 1 ? "" : "s"} staged ({Math.round(totalStagedSize / 1024)} KB) • Ready for indexing
+              </span>
             ) : (
-              <>
-                <Search className="w-5 h-5" />
-                {t("upload_index_project")}
-              </>
+              <span>Stage project files or archives above to begin indexing.</span>
             )}
-          </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+            {!isScanning && uploadedFiles.length > 0 && (
+              <button
+                type="button"
+                onClick={clearUpload}
+                className="btn-danger w-full sm:w-auto px-5 py-2.5 text-xs font-semibold rounded-xl"
+              >
+                <Trash2 className="w-4 h-4" />
+                {t("clear_uploads", "Clear Uploads")}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={startDirectScan}
+              disabled={isIntakeScanning || isProcessingFiles || isTraversing || uploadedFiles.length === 0}
+              className="w-full sm:w-auto bg-primary hover:bg-primary-hover text-primary-text font-bold text-sm rounded-xl px-7 py-3 shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 transform active:scale-95 disabled:opacity-40 disabled:pointer-events-none"
+            >
+              {isIntakeScanning ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  {t("processing_files")}
+                </>
+              ) : (
+                <>
+                  <Search className="w-4 h-4" />
+                  {t("upload_index_project")}
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </motion.div>

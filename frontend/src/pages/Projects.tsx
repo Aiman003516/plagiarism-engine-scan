@@ -263,11 +263,11 @@ export default function Projects() {
             onClick={() => setActiveTab("semantic")}
             className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
               activeTab === "semantic"
-                ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm"
+                ? "bg-primary text-primary-text shadow-sm"
                 : "text-text-muted hover:text-text-main hover:bg-surface"
             }`}
           >
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" /> {t("tab_ai_search") || "AI Semantic Proposal Search"}
+            <Sparkles className="w-3.5 h-3.5 text-accent" /> {t("tab_ai_search") || "AI Semantic Proposal Search"}
           </button>
         </div>
       </header>
@@ -485,7 +485,7 @@ export default function Projects() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-bold text-text-main flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-purple-500" />
+                  <Sparkles className="w-5 h-5 text-primary" />
                   AI Semantic Proposal & Abstract Search
                 </h2>
                 <p className="text-xs text-text-muted mt-1 max-w-2xl leading-relaxed">
@@ -493,7 +493,7 @@ export default function Projects() {
                   Our dense neural semantic model (BAAI/bge-m3) performs multilingual vector similarity matching across all indexed projects in the database.
                 </p>
               </div>
-              <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-purple-500/10 text-purple-500 border border-purple-500/20 flex-shrink-0">
+              <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-primary/10 text-primary border border-primary/20 flex-shrink-0">
                 Model: {modelUsed} (1024-d)
               </span>
             </div>
@@ -534,7 +534,7 @@ export default function Projects() {
                     value={semanticUni}
                     onChange={(e) => setSemanticUni(e.target.value)}
                     className="input-field w-full text-xs"
-                    placeholder="e.g. Baghdad University"
+                    placeholder="e.g. Sana'a University"
                   />
                 </div>
 
@@ -563,7 +563,7 @@ export default function Projects() {
                 <button
                   type="submit"
                   disabled={searchingSemantic || !semanticQuery.trim()}
-                  className="px-5 py-2.5 rounded-xl font-semibold text-sm bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md hover:from-purple-500 hover:to-indigo-500 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn-primary px-6 py-2.5 rounded-xl font-semibold text-sm shadow-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {searchingSemantic ? (
                     <>
@@ -572,7 +572,7 @@ export default function Projects() {
                     </>
                   ) : (
                     <>
-                      <Sparkles className="w-4 h-4 text-amber-300" />
+                      <Sparkles className="w-4 h-4 text-accent" />
                       Search Existing Projects
                     </>
                   )}

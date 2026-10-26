@@ -1,4 +1,4 @@
-﻿import React, { useState } from "react";
+import React, { useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -111,28 +111,28 @@ export function Plagiarism() {
       </div>
 
       {/* DUAL-MODE INTAKE SWITCHER TABS */}
-      <div className="flex border-b border-glass-border gap-2">
+      <div className="flex flex-wrap items-center gap-2 p-1.5 rounded-2xl bg-surface/70 border border-border/60 shadow-sm backdrop-blur">
         <button
           onClick={() => setActiveTab("direct")}
-          className={`pb-3 px-4 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 ${
             activeTab === "direct"
-              ? "border-accent text-primary dark:text-accent"
-              : "border-transparent text-text-muted hover:text-text-main"
+              ? "bg-primary text-primary-text shadow-sm"
+              : "text-text-muted hover:text-text-main hover:bg-surface"
           }`}
         >
           <UploadCloud className="w-4 h-4" />
-          {t("tab_direct_upload")}
+          <span>{t("tab_direct_upload") || "Direct File & Folder Upload"}</span>
         </button>
         <button
           onClick={() => setActiveTab("git")}
-          className={`pb-3 px-4 font-semibold text-sm flex items-center gap-2 border-b-2 transition-all ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 ${
             activeTab === "git"
-              ? "border-accent text-primary dark:text-accent"
-              : "border-transparent text-text-muted hover:text-text-main"
+              ? "bg-primary text-primary-text shadow-sm"
+              : "text-text-muted hover:text-text-main hover:bg-surface"
           }`}
         >
           <Code2 className="w-4 h-4" />
-          {t("tab_git_repo")}
+          <span>{t("tab_git_repo") || "Git Repository Clone"}</span>
         </button>
       </div>
 

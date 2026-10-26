@@ -1,4 +1,4 @@
-﻿"""System health and dashboard statistics endpoints."""
+"""System health and dashboard statistics endpoints."""
 
 import asyncio
 import time
@@ -26,10 +26,11 @@ async def health_check():
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
 
-@router.get("/api/dashboard/stats", dependencies=[Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))])
-async def dashboard_stats():
+@router.get("/api/dashboard/stats")
+async def dashboard_stats(current_user: dict = Depends(require_role("ministry_admin", "university_admin", "college_admin", "faculty"))):
     db = get_db()
     loop = asyncio.get_running_loop()
+    caller_role = current_user.get("role")
 
     def _compute():
         history = _load_history()
@@ -67,10 +68,24 @@ async def dashboard_stats():
             else:
                 safe_projects += 1
 
+        # Detailed user breakdown
+        total_users = db.count_users()
+        total_students = 0
+        try:
+            conn = db._get_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM students;")
+            row = cur.fetchone()
+            total_students = int(row[0]) if row else 0
+        except Exception:
+            pass
+
         return {
             "total_projects": len(project_names),
             "total_teams": db.count_teams(),
-            "total_users": db.count_users(),
+            "total_users": total_users,
+            "total_staff": max(0, total_users - total_students),
+            "total_students": total_students,
             "total_files": db.count_files(),
             "recent_scans": recent_scans,
             "flagged_count": flagged_projects,
@@ -78,6 +93,7 @@ async def dashboard_stats():
             "total_scans": len(history),
             "average_fusion_score": avg_score,
             "verdicts_distribution": verdicts,
+            "caller_role": caller_role,
         }
 
     stats = await loop.run_in_executor(None, _compute)

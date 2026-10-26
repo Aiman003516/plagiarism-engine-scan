@@ -1096,6 +1096,8 @@ export interface DashboardStats {
   total_projects: number;
   total_teams: number;
   total_users: number;
+  total_staff?: number;
+  total_students?: number;
   total_files: number;
   recent_scans: Array<Record<string, any>>;
   flagged_count: number;
@@ -1103,6 +1105,7 @@ export interface DashboardStats {
   total_scans?: number;
   average_fusion_score?: number;
   verdicts_distribution?: { SAFE: number; LOW: number; HIGH: number; CRITICAL: number; FLAGGED: number; };
+  caller_role?: string;
 }
 
 export const dashboardApi = {

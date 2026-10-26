@@ -37,6 +37,8 @@ export function ScanHistoryModal({ isOpen, onClose, onSelectReport }: ScanHistor
   const { t } = useTranslation();
   const { historyList, loading, refresh } = useHistoryCache();
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [inspectingId, setInspectingId] = useState<string | null>(null);
   const [previewReport, setPreviewReport] = useState<PlagiarismScanResult | null>(null);
@@ -90,6 +92,11 @@ export function ScanHistoryModal({ isOpen, onClose, onSelectReport }: ScanHistor
       (h.id || "").toLowerCase().includes(q)
     );
   });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedItems = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
 
   if (!isOpen) return null;
 
@@ -185,10 +192,11 @@ export function ScanHistoryModal({ isOpen, onClose, onSelectReport }: ScanHistor
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/50">
-                    {filtered.map((item) => {
+                    {paginatedItems.map((item) => {
                       const overall = Number(item.overall_similarity ?? 0);
                       const isInspecting = inspectingId === item.id;
                       const isDownloading = downloadingId === item.id;
+
 
                       return (
                         <tr key={item.id} className="hover:bg-surface-hover/40 transition-colors">
@@ -277,6 +285,35 @@ export function ScanHistoryModal({ isOpen, onClose, onSelectReport }: ScanHistor
                     })}
                   </tbody>
                 </table>
+
+                {/* Pagination Controls */}
+                {totalPages > 1 && (
+                  <div className="p-3 border-t border-border bg-surface/50 flex items-center justify-between text-xs text-text-muted">
+                    <div>
+                      Showing {(currentPage - 1) * PAGE_SIZE + 1} to{" "}
+                      {Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length} reports
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                        className="px-2.5 py-1 rounded-lg border border-border bg-surface hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Previous
+                      </button>
+                      <span className="font-semibold text-text-main">
+                        {currentPage} / {totalPages}
+                      </span>
+                      <button
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                        className="px-2.5 py-1 rounded-lg border border-border bg-surface hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

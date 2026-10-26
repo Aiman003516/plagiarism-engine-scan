@@ -20,7 +20,7 @@ import {
   Sun,
   Shield,
   LogOut,
-  Languages,
+  Globe,
 } from "lucide-react";
 import { useScanStore } from "./lib/scanStore";
 
@@ -80,12 +80,19 @@ function Sidebar() {
 
   return (
     <aside className="fixed md:static inset-y-0 start-0 z-40 flex flex-col w-16 md:w-64 bg-card border-e border-border transition-all duration-300 print:hidden select-none">
-      {/* Logo */}
-      <div className="flex items-center justify-center md:justify-start h-16 px-0 md:px-5 border-b border-border shrink-0">
-        <Shield className="w-7 h-7 text-primary flex-shrink-0" />
-        <span className="hidden md:block ms-3 font-bold text-base text-primary tracking-tight truncate">
-          {t("ministry_system") || "Ministry System"}
-        </span>
+      {/* Logo / Brand Lockup */}
+      <div className="flex items-center justify-center md:justify-start h-16 px-0 md:px-4 border-b border-border shrink-0">
+        <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary flex-shrink-0 shadow-sm">
+          <Shield className="w-5 h-5" />
+        </div>
+        <div className="hidden md:flex flex-col ms-2.5 min-w-0">
+          <span className="font-extrabold text-base text-primary tracking-tight truncate leading-tight flex items-center gap-1.5">
+            نزاهة <span className="text-xs font-semibold opacity-60">| NAZAHA</span>
+          </span>
+          <span className="text-[10px] text-text-muted font-medium truncate">
+            {i18n.language === "ar" ? "المنصة الوطنية للنزاهة الأكاديمية" : "Academic Integrity Platform"}
+          </span>
+        </div>
       </div>
 
       {/* Navigation */}
@@ -144,13 +151,13 @@ function Sidebar() {
           <button
             type="button"
             onClick={toggleLanguage}
-            className="flex items-center justify-center md:justify-start gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold text-text-muted hover:bg-text-muted/10 hover:text-text-main transition-colors border border-border/70"
+            className="flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold text-text-muted hover:bg-text-muted/10 hover:text-text-main transition-colors border border-border/70"
             title={i18n.language === "ar" ? "Switch to English" : "التبديل إلى العربية"}
             aria-label="Toggle language"
           >
-            <Languages className="w-4 h-4 flex-shrink-0 text-primary" />
-            <span className="hidden md:inline font-semibold">
-              {i18n.language === "ar" ? "EN" : "العربية"}
+            <Globe className="w-4 h-4 flex-shrink-0 text-primary" />
+            <span className="text-xs font-bold text-primary">
+              {i18n.language === "ar" ? "EN" : "عربي"}
             </span>
           </button>
         </div>
