@@ -10,7 +10,7 @@
 import React, { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ShieldCheck, Lock, Loader2 } from "lucide-react";
+import { Lock, Loader2 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { authApi } from "../lib/api";
@@ -90,8 +90,8 @@ export default function ForceChangePassword() {
         className="w-full max-w-md glass-panel p-8"
       >
         <div className="flex flex-col items-center mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-primary text-primary-text flex items-center justify-center mb-3">
-            <ShieldCheck className="w-6 h-6" />
+          <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-3 shadow-md p-2.5 overflow-hidden">
+            <img src="/favicon.svg" alt="NAZAHA Logo" className="w-full h-full object-contain" />
           </div>
           <h1 className="text-2xl font-bold text-text-main">
             {t("force_password_title")}

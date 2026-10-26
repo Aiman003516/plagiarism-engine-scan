@@ -18,7 +18,6 @@ import {
   Settings,
   Moon,
   Sun,
-  Shield,
   LogOut,
   Globe,
 } from "lucide-react";
@@ -66,8 +65,8 @@ function Sidebar() {
     <aside className="fixed md:static inset-y-0 start-0 z-40 flex flex-col w-16 md:w-64 bg-card border-e border-border transition-all duration-300 print:hidden select-none">
       {/* Logo / Brand Lockup */}
       <div className="flex items-center justify-center md:justify-start h-16 px-0 md:px-4 border-b border-border shrink-0">
-        <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary flex-shrink-0 shadow-sm">
-          <Shield className="w-5 h-5" />
+        <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary flex-shrink-0 shadow-sm p-1.5 overflow-hidden">
+          <img src="/favicon.svg" alt="NAZAHA Logo" className="w-full h-full object-contain" />
         </div>
         <div className="hidden md:flex flex-col ms-2.5 min-w-0">
           <span className="font-extrabold text-base text-primary tracking-tight truncate leading-tight flex items-center gap-1.5">
@@ -114,32 +113,29 @@ function Sidebar() {
       {/* Bottom Controls / Footer */}
       <div className="p-2 md:p-3 border-t border-border shrink-0 space-y-2">
         {/* Dark Mode & 1-Click Language Switcher Row */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-col md:flex-row items-center gap-2">
           <button
             type="button"
             onClick={toggleDarkMode}
-            className="flex items-center justify-center md:justify-start gap-2 flex-1 px-2.5 py-2 rounded-xl text-xs font-medium text-text-muted hover:bg-text-muted/10 hover:text-text-main transition-colors"
-            title={isDark ? (t("light_mode") || "Light Mode") : (t("dark_mode") || "Dark Mode")}
+            className="flex items-center justify-center w-full py-2.5 rounded-xl border border-border/70 bg-surface/40 hover:bg-surface text-text-muted hover:text-text-main transition-colors shadow-sm"
+            title={isDark ? (i18n.language === "ar" ? "التبديل إلى الوضع النهاري" : "Switch to Light Mode") : (i18n.language === "ar" ? "التبديل إلى الوضع الليلي" : "Switch to Dark Mode")}
             aria-label="Toggle dark mode"
           >
             {isDark ? (
-              <Sun className="w-4 h-4 flex-shrink-0 text-amber-500" />
+              <Sun className="w-4 h-4 text-amber-400" />
             ) : (
-              <Moon className="w-4 h-4 flex-shrink-0 text-indigo-400" />
+              <Moon className="w-4 h-4 text-indigo-400" />
             )}
-            <span className="hidden md:inline truncate">
-              {isDark ? (t("light_mode") || "Light Mode") : (t("dark_mode") || "Dark Mode")}
-            </span>
           </button>
 
           <button
             type="button"
             onClick={toggleLanguage}
-            className="flex items-center justify-center p-2 rounded-xl text-primary hover:bg-text-muted/10 hover:text-text-main transition-colors border border-border/70"
+            className="flex items-center justify-center w-full py-2.5 rounded-xl border border-border/70 bg-surface/40 hover:bg-surface text-primary hover:text-text-main transition-colors shadow-sm"
             title={i18n.language === "ar" ? "Switch to English" : "التبديل إلى العربية"}
             aria-label="Toggle language"
           >
-            <Globe className="w-4 h-4 flex-shrink-0" />
+            <Globe className="w-4 h-4" />
           </button>
         </div>
 

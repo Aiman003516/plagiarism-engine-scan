@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Shield, Mail, Lock, Loader2, Globe, Sun, Moon } from "lucide-react";
+import { Mail, Lock, Loader2, Globe, Sun, Moon } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useTranslation } from "react-i18next";
 import { authApi } from "../lib/api";
@@ -61,11 +61,11 @@ export default function Login() {
           type="button"
           onClick={toggleDarkMode}
           className="p-2.5 rounded-xl border border-border bg-surface/80 backdrop-blur text-text-muted hover:text-text-main hover:bg-surface-hover transition-all duration-200 shadow-sm flex items-center justify-center"
-          title={isDark ? (t("light_mode") || "Light Mode") : (t("dark_mode") || "Dark Mode")}
+          title={isDark ? (i18n.language === "ar" ? "التبديل إلى الوضع النهاري" : "Switch to Light Mode") : (i18n.language === "ar" ? "التبديل إلى الوضع الليلي" : "Switch to Dark Mode")}
           aria-label="Toggle dark mode"
         >
           {isDark ? (
-            <Sun className="w-4 h-4 text-amber-500" />
+            <Sun className="w-4 h-4 text-amber-400" />
           ) : (
             <Moon className="w-4 h-4 text-indigo-400" />
           )}
@@ -88,8 +88,8 @@ export default function Login() {
         className="w-full max-w-md glass-panel p-8"
       >
         <div className="flex flex-col items-center mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-primary text-primary-text flex items-center justify-center mb-3">
-            <Shield className="w-6 h-6" />
+          <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-3 shadow-md p-2.5 overflow-hidden">
+            <img src="/favicon.svg" alt="NAZAHA Logo" className="w-full h-full object-contain" />
           </div>
           <h1 className="text-2xl font-bold text-text-main text-center">{t("login_title")}</h1>
           <p className="text-sm text-text-muted mt-1 text-center">{t("login_subtitle")}</p>

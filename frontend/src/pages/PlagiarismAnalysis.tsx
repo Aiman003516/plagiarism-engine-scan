@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Database, Search, RefreshCw, AlertTriangle, ShieldCheck, GitCompare, Eye, X, Cpu } from 'lucide-react';
+import { Database, Search, RefreshCw, AlertTriangle, ShieldCheck, GitCompare, Eye, X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import {
   plagiarismApi,
@@ -260,19 +260,10 @@ export function PlagiarismAnalysis() {
       {/* Top Header with History Action */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl font-bold text-text-main flex items-center gap-2.5">
-              <Database className="w-7 h-7 text-primary" />
-              {t("scanner_title") || "Plagiarism Scanner & Analysis"}
-            </h1>
-            <span 
-              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-primary/10 text-primary border border-primary/20 dark:bg-accent/10 dark:text-accent dark:border-accent/20 cursor-help" 
-              title={t("engine_architecture_detail")}
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              {t("engine_architecture_title")}
-            </span>
-          </div>
+          <h1 className="text-2xl font-bold text-text-main flex items-center gap-2.5">
+            <Database className="w-7 h-7 text-primary" />
+            {t("scanner_title") || "Plagiarism Scanner & Analysis"}
+          </h1>
           <p className="text-text-muted text-sm mt-0.5">
             {t("scanner_subtitle")}
           </p>
